@@ -36,7 +36,17 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 COPY package.json package-lock.json ./
-RUN npm ci --force
+# Resilient install for flaky/constrained networks. The default npm parallelism
+# (~15 sockets) trips ECONNRESET under sustained load on some NAT/proxy/VM
+# setups; maxsockets=1 serializes downloads (slower but reliable), and the
+# retry/timeout settings let a dropped request recover instead of aborting.
+ENV npm_config_maxsockets=1 \
+    npm_config_fetch_retries=5 \
+    npm_config_fetch_retry_factor=2 \
+    npm_config_fetch_retry_mintimeout=20000 \
+    npm_config_fetch_retry_maxtimeout=120000 \
+    npm_config_fetch_timeout=600000
+RUN npm ci --force --no-audit --no-fund
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
