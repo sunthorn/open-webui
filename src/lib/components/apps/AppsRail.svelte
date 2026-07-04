@@ -44,17 +44,17 @@
 </script>
 
 <nav
-	aria-label="xplan-agent apps"
+	aria-label="xplan apps"
 	class="min-w-[4.5rem] w-[4.5rem] shrink-0 h-full bg-gray-50 dark:bg-gray-950 border-r border-gray-100 dark:border-gray-900 flex flex-col items-center gap-1 pt-4"
 >
-	<!-- xplan-agent brand monogram -->
-	<Tooltip content="xplan-agent" placement="right">
+	<!-- xplan brand monogram -->
+	<Tooltip content="xplan" placement="right">
 		<a
 			href="/apps/overview"
-			aria-label="xplan-agent home"
+			aria-label="xplan home"
 			class="size-11 rounded-2xl bg-black dark:bg-white text-white dark:text-black flex items-center justify-center font-semibold tracking-tight select-none"
 		>
-			xa
+			xp
 		</a>
 	</Tooltip>
 
@@ -110,4 +110,30 @@
 			</Tooltip>
 		</div>
 	{/each}
+
+	<!-- Back to Open WebUI (dashboard hides the chat sidebar, so offer a way out) -->
+	<div class="mt-auto mb-4 flex justify-center w-full">
+		<Tooltip content="Back to Open WebUI" placement="right">
+			<a
+				href="/"
+				aria-label="Back to Open WebUI"
+				class="size-11 flex items-center justify-center rounded-2xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-900"
+			>
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke-width="1.7"
+					stroke="currentColor"
+					class="size-5"
+				>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"
+					/>
+				</svg>
+			</a>
+		</Tooltip>
+	</div>
 </nav>

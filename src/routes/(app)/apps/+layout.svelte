@@ -12,7 +12,11 @@
 	});
 </script>
 
-<div class="flex flex-row h-screen w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+<!-- Full-viewport overlay so the dashboard fully replaces OWUI's chrome
+     (chat sidebar + main menu) instead of rendering beside it and overlapping. -->
+<div
+	class="fixed inset-0 z-[60] flex flex-row h-screen w-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+>
 	<AppsRail />
 	<main class="flex-1 h-full overflow-y-auto">
 		<slot />

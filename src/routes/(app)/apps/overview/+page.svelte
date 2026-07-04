@@ -1,91 +1,122 @@
 <script lang="ts">
-	// Overview / Today — Slice 1, Stage A.
-	// Layout + mock data only. Stage B replaces `data` with the live
-	// PlannerOverview pulled from XPLAN via hermes (see shared-contracts).
+	// Overview / Today — Slice 1, Stage B.
+	// Button-triggered live read of the planner's XPLAN dashboard via hermes.
+	// (A deep auto-scrape on mount is intentionally avoided: it is slow and
+	// makes the agent thrash. See src/lib/apis/xplan.)
 	import { onMount } from 'svelte';
-
-	// --- Mock data (Stage A). Shape mirrors the planned PlannerOverview DTO. ---
-	const data = {
-		counts: { tasksToday: 7, reviewsDue: 3, newLeads: 2 },
-		todos: [
-			{ id: '1', title: 'Call re: SOA sign-off', client: 'Berry, Nicholas', due: '10:30' },
-			{ id: '2', title: 'Review super rollover docs', client: 'Lee, Katherine', due: '13:00' },
-			{ id: '3', title: 'Prep annual review pack', client: 'Nguyen, David', due: '15:30' },
-			{ id: '4', title: 'Confirm insurance beneficiary', client: 'Osei, Grace', due: '16:00' }
-		]
-	};
-
-	const cards = [
-		{ key: 'tasksToday', label: 'Tasks today', value: data.counts.tasksToday },
-		{ key: 'reviewsDue', label: 'Reviews due', value: data.counts.reviewsDue },
-		{ key: 'newLeads', label: 'New leads', value: data.counts.newLeads }
-	];
+	import { syncXplanOverview } from '$lib/apis/xplan';
 
 	let greeting = 'Hello';
 	let today = '';
+
+	type State = 'idle' | 'loading' | 'done' | 'error';
+	let state: State = 'idle';
+	let lines: string[] = [];
+	let notLoggedIn = false;
+	let errorMsg = '';
+	let syncedAt = '';
+
 	onMount(() => {
 		const now = new Date();
 		const h = now.getHours();
 		greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-		today = now.toLocaleDateString(undefined, {
-			weekday: 'long',
-			day: 'numeric',
-			month: 'long'
-		});
+		today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 	});
+
+	const sync = async () => {
+		state = 'loading';
+		errorMsg = '';
+		notLoggedIn = false;
+		try {
+			const token = localStorage.getItem('token') ?? '';
+			const summary = await syncXplanOverview(token);
+			if (summary.includes('NOT_LOGGED_IN')) {
+				notLoggedIn = true;
+				lines = [];
+			} else {
+				lines = summary
+					.split('\n')
+					.map((l) => l.replace(/^[-•*]\s*/, '').trim())
+					.filter((l) => l.length > 0);
+			}
+			syncedAt = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+			state = 'done';
+		} catch (e: any) {
+			errorMsg = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
+			state = 'error';
+		}
+	};
 </script>
 
-<div class="max-w-4xl mx-auto px-8 py-10">
+<div class="max-w-3xl mx-auto px-8 py-10">
 	<!-- Header -->
 	<div class="flex items-start justify-between gap-4 mb-8">
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">{greeting}</h1>
 			<p class="text-sm text-gray-500 mt-1">{today} · Today's overview</p>
 		</div>
-		<span
-			class="shrink-0 text-[11px] font-medium px-2 py-1 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-			title="Placeholder data — live XPLAN data lands in Stage B"
+		<button
+			on:click={sync}
+			disabled={state === 'loading'}
+			class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl
+				bg-black text-white dark:bg-white dark:text-black
+				hover:opacity-90 disabled:opacity-50 disabled:cursor-wait transition"
 		>
-			mock data
-		</span>
+			{#if state === 'loading'}
+				<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none">
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+				</svg>
+				Reading XPLAN…
+			{:else}
+				Sync from XPLAN
+			{/if}
+		</button>
 	</div>
 
-	<!-- Summary cards -->
-	<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10">
-		{#each cards as card}
-			<div
-				class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-5"
-			>
-				<div class="text-3xl font-semibold tabular-nums">{card.value}</div>
-				<div class="text-sm text-gray-500 mt-1">{card.label}</div>
+	<!-- Live panel -->
+	<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6 min-h-[10rem]">
+		<div class="flex items-center justify-between mb-3">
+			<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+				From your XPLAN dashboard
+			</h2>
+			{#if state === 'done' && !notLoggedIn}
+				<span class="text-xs text-gray-400">Last synced {syncedAt}</span>
+			{/if}
+		</div>
+
+		{#if state === 'idle'}
+			<p class="text-sm text-gray-500">
+				Click <span class="font-medium">Sync from XPLAN</span> to pull a live read of your
+				logged-in XPLAN dashboard.
+			</p>
+		{:else if state === 'loading'}
+			<p class="text-sm text-gray-500">Reading your XPLAN dashboard — this takes ~15 seconds…</p>
+		{:else if state === 'error'}
+			<div class="text-sm text-red-600 dark:text-red-400">
+				<p class="font-medium">Couldn't reach XPLAN.</p>
+				<p class="mt-1 text-red-500/80">{errorMsg}</p>
+				<button on:click={sync} class="mt-3 underline underline-offset-2">Try again</button>
 			</div>
-		{/each}
+		{:else if notLoggedIn}
+			<div class="text-sm text-amber-600 dark:text-amber-400">
+				<p class="font-medium">Your XPLAN session isn't logged in.</p>
+				<p class="mt-1">Open the debug Chrome, sign in to XPLAN, then sync again.</p>
+			</div>
+		{:else}
+			<ul class="space-y-2">
+				{#each lines as line}
+					<li class="flex items-start gap-2.5 text-sm">
+						<span class="mt-1.5 size-1.5 rounded-full bg-gray-400 shrink-0"></span>
+						<span>{line}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</div>
 
-	<!-- Today's to-do -->
-	<div>
-		<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-			Today's to-do
-		</h2>
-		<ul class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
-			{#each data.todos as todo}
-				<li class="flex items-center gap-3 px-5 py-3.5 hover:bg-gray-50 dark:hover:bg-gray-850">
-					<input
-						type="checkbox"
-						class="size-4 rounded border-gray-300 dark:border-gray-600 accent-black dark:accent-white"
-						aria-label={`Mark "${todo.title}" done`}
-					/>
-					<div class="flex-1 min-w-0">
-						<div class="text-sm font-medium truncate">{todo.title}</div>
-						<div class="text-xs text-gray-500 truncate">{todo.client}</div>
-					</div>
-					<div class="text-xs text-gray-400 tabular-nums shrink-0">{todo.due}</div>
-				</li>
-			{/each}
-		</ul>
-		<p class="text-xs text-gray-400 mt-4">
-			Slice 1 · Stage A — layout with placeholder data. Next: live tasks pulled from your
-			logged-in XPLAN via hermes.
-		</p>
-	</div>
+	<p class="text-xs text-gray-400 mt-4">
+		Slice 1 · Stage B — live data pulled from your logged-in XPLAN via hermes (read-only; nothing
+		is written back).
+	</p>
 </div>
