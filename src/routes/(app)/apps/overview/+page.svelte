@@ -5,6 +5,7 @@
 	// makes the agent thrash. See src/lib/apis/xplan.)
 	import { onMount } from 'svelte';
 	import { syncXplanOverview } from '$lib/apis/xplan';
+	import { getOverviewSnapshot, saveOverviewSnapshot } from '$lib/apis/gateway';
 
 	let greeting = 'Hello';
 	let today = '';
@@ -14,13 +15,36 @@
 	let lines: string[] = [];
 	let notLoggedIn = false;
 	let errorMsg = '';
-	let syncedAt = '';
+	let syncedAt = ''; // ISO 8601 of the last successful sync ('' = never)
 
-	onMount(() => {
+	// Friendly label for a stored ISO timestamp.
+	const fmtSynced = (iso: string) => {
+		if (!iso) return '';
+		const d = new Date(iso);
+		const sameDay = d.toDateString() === new Date().toDateString();
+		return sameDay
+			? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+			: d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+	};
+
+	onMount(async () => {
 		const now = new Date();
 		const h = now.getHours();
 		greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 		today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+
+		// Restore the last saved sync so the planner doesn't have to re-run it.
+		try {
+			const snap = await getOverviewSnapshot(localStorage.getItem('token') ?? '');
+			if (snap) {
+				lines = snap.lines ?? [];
+				notLoggedIn = snap.notLoggedIn ?? false;
+				syncedAt = snap.syncedAt ?? '';
+				state = 'done';
+			}
+		} catch (e) {
+			console.warn('Could not load saved overview snapshot:', e);
+		}
 	});
 
 	const sync = async () => {
@@ -39,8 +63,14 @@
 					.map((l) => l.replace(/^[-•*]\s*/, '').trim())
 					.filter((l) => l.length > 0);
 			}
-			syncedAt = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+			syncedAt = new Date().toISOString();
 			state = 'done';
+			// Persist so the next visit shows this without re-running the sync.
+			try {
+				await saveOverviewSnapshot(token, { lines, notLoggedIn, syncedAt });
+			} catch (e) {
+				console.warn('Could not save overview snapshot:', e);
+			}
 		} catch (e: any) {
 			errorMsg = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
 			state = 'error';
@@ -80,8 +110,8 @@
 			<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">
 				From your XPLAN dashboard
 			</h2>
-			{#if state === 'done' && !notLoggedIn}
-				<span class="text-xs text-gray-400">Last synced {syncedAt}</span>
+			{#if state === 'done' && !notLoggedIn && syncedAt}
+				<span class="text-xs text-gray-400">Last synced {fmtSynced(syncedAt)}</span>
 			{/if}
 		</div>
 

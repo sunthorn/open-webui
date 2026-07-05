@@ -45,6 +45,42 @@ export const getBriefing = async (token: string): Promise<DailyBriefing | null> 
 	return (body?.data?.content ?? null) as DailyBriefing | null;
 };
 
+// --- Overview snapshot (last XPLAN sync) ----------------------------------
+// Persist the last "Sync from XPLAN" result so the Overview reloads it on
+// visit instead of forcing the planner to re-run the (slow) live sync.
+
+export interface OverviewSnapshot {
+	lines: string[];
+	notLoggedIn: boolean;
+	syncedAt: string; // ISO 8601
+}
+
+/** Load the last saved Overview snapshot, or null if none exists yet. */
+export const getOverviewSnapshot = async (token: string): Promise<OverviewSnapshot | null> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/outputs/overview:xplan`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (res.status === 404) return null;
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+	return ((await res.json())?.data?.content ?? null) as OverviewSnapshot | null;
+};
+
+/** Save the latest Overview snapshot. */
+export const saveOverviewSnapshot = async (token: string, snapshot: OverviewSnapshot): Promise<void> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/outputs/overview:xplan`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ kind: 'overview_snapshot', content: snapshot })
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+};
+
 // --- New Client Onboarding sessions ---------------------------------------
 // Persisted so the planner can leave the review and return. Stored as one
 // AgentOutput per session at key `onboarding:{sessionId}`.
