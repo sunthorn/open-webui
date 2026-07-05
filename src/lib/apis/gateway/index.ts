@@ -45,6 +45,36 @@ export const getBriefing = async (token: string): Promise<DailyBriefing | null> 
 	return (body?.data?.content ?? null) as DailyBriefing | null;
 };
 
+// --- New Client Onboarding sessions ---------------------------------------
+// Persisted so the planner can leave the review and return. Stored as one
+// AgentOutput per session at key `onboarding:{sessionId}`.
+
+/** Load a saved onboarding session, or null if none exists yet. */
+export const getOnboardingSession = async (token: string, sessionId: string): Promise<any | null> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/outputs/onboarding:${sessionId}`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (res.status === 404) return null;
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+	return (await res.json())?.data?.content ?? null;
+};
+
+/** Upsert an onboarding session. `session` is the OnboardingSession content. */
+export const saveOnboardingSession = async (token: string, sessionId: string, session: any): Promise<void> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/outputs/onboarding:${sessionId}`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ kind: 'onboarding_session', content: session })
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+};
+
 // --- XPLAN guardrail (browser access on/off) -----------------------------
 // locked === true  → hermes cannot open/read/write XPLAN.
 
