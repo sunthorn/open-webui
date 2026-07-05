@@ -44,3 +44,24 @@ export const getBriefing = async (token: string): Promise<DailyBriefing | null> 
 	const body = await res.json(); // { success, data: AgentOutput }
 	return (body?.data?.content ?? null) as DailyBriefing | null;
 };
+
+// --- XPLAN guardrail (browser access on/off) -----------------------------
+// locked === true  → hermes cannot open/read/write XPLAN.
+
+export const getGuardrail = async (token: string): Promise<boolean> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/guardrail`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
+	return !!(await res.json()).locked;
+};
+
+export const setGuardrail = async (token: string, locked: boolean): Promise<boolean> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/guardrail`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ locked })
+	});
+	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
+	return !!(await res.json()).locked;
+};
