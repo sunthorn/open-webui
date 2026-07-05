@@ -3,14 +3,28 @@
 	// Wizard: Start → Upload → Review/Approve → Write (Phase B stub).
 	// Nothing is written to XPLAN here — the agent only PROPOSES; the planner
 	// approves. See docs/onboarding-build-plan.md.
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { extractDocument, proposeMapping, type OnboardingProposal, type ProposalItem } from '$lib/apis/onboarding';
 	import { saveOnboardingSession } from '$lib/apis/gateway';
+	import { activeClient } from '$lib/apps/activeClient';
 
 	type Stage = 'start' | 'upload' | 'review' | 'write';
 	let stage: Stage = 'start';
 
 	let clientName = '';
 	let clientMode: 'new' | 'existing' = 'new';
+
+	// Adopt the active client set on the Clients hub — Data Entry never asks
+	// "who?" again; it works on whoever the planner selected.
+	onMount(() => {
+		if ($activeClient) {
+			clientName = $activeClient.name;
+			clientMode = $activeClient.mode;
+			sessionId = newSessionId();
+			stage = 'upload';
+		}
+	});
 
 	let files: File[] = [];
 	let dragging = false;
@@ -28,15 +42,6 @@
 	const newSessionId = () =>
 		(crypto?.randomUUID?.() ?? `s-${Date.now()}-${Math.round(Math.random() * 1e6)}`).slice(0, 36);
 
-	const startUpload = () => {
-		if (!clientName.trim()) {
-			error = 'Enter the client’s name first.';
-			return;
-		}
-		error = '';
-		sessionId = newSessionId();
-		stage = 'upload';
-	};
 
 	const onDrop = (e: DragEvent) => {
 		e.preventDefault();
@@ -133,11 +138,10 @@
 	};
 
 	const restart = () => {
-		stage = 'start';
-		clientName = '';
 		files = [];
 		proposal = null;
 		error = '';
+		goto('/apps/clients'); // pick another client to work on
 	};
 
 	const confidenceClass = (c?: number) =>
@@ -180,45 +184,16 @@
 		</div>
 	{/if}
 
-	<!-- STEP 1 — Start -->
+	<!-- STEP 1 — Start (only when no client is selected) -->
 	{#if stage === 'start'}
-		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6 space-y-5">
-			<div>
-				<label class="block text-sm font-medium mb-1.5" for="client-name">Client name</label>
-				<input
-					id="client-name"
-					bind:value={clientName}
-					placeholder="e.g. Jane Citizen"
-					class="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
-					on:keydown={(e) => e.key === 'Enter' && startUpload()}
-				/>
-			</div>
-			<div>
-				<span class="block text-sm font-medium mb-1.5">Record</span>
-				<div class="flex gap-2">
-					<button
-						on:click={() => (clientMode = 'new')}
-						class="flex-1 rounded-xl border px-3.5 py-2.5 text-sm text-left transition
-							{clientMode === 'new' ? 'border-black dark:border-white bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-700 text-gray-500'}"
-					>
-						<span class="font-medium">New client</span>
-						<span class="block text-xs text-gray-400">Create a fresh XPLAN record (Phase B)</span>
-					</button>
-					<button
-						on:click={() => (clientMode = 'existing')}
-						class="flex-1 rounded-xl border px-3.5 py-2.5 text-sm text-left transition
-							{clientMode === 'existing' ? 'border-black dark:border-white bg-white dark:bg-gray-900' : 'border-gray-200 dark:border-gray-700 text-gray-500'}"
-					>
-						<span class="font-medium">Existing client</span>
-						<span class="block text-xs text-gray-400">Add to a record (lookup in Phase C)</span>
-					</button>
-				</div>
-			</div>
+		<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 p-8 text-center">
+			<p class="text-sm font-medium">No client selected</p>
+			<p class="text-sm text-gray-500 mt-1 mb-4">Choose who you’re working on first — Data Entry works on the active client.</p>
 			<button
-				on:click={startUpload}
-				class="w-full rounded-xl bg-black text-white dark:bg-white dark:text-black py-2.5 text-sm font-medium hover:opacity-90 transition"
+				on:click={() => goto('/apps/clients')}
+				class="inline-flex rounded-xl bg-black text-white dark:bg-white dark:text-black px-4 py-2.5 text-sm font-medium hover:opacity-90 transition"
 			>
-				Continue
+				Choose a client
 			</button>
 		</div>
 
@@ -256,7 +231,7 @@
 			{/if}
 
 			<div class="flex items-center justify-between gap-3 pt-1">
-				<button on:click={() => (stage = 'start')} class="text-sm text-gray-500 hover:text-black dark:hover:text-white">← Back</button>
+				<button on:click={() => goto('/apps/clients')} class="text-sm text-gray-500 hover:text-black dark:hover:text-white">← Change client</button>
 				<button
 					on:click={runProposal}
 					disabled={busy || !files.length}
