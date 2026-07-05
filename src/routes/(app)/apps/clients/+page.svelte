@@ -7,9 +7,11 @@
 	import { goto } from '$app/navigation';
 	import { getBriefing } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
+	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 
 	let query = '';
 	let attention: string[] = []; // client names surfaced from the briefing
+	let leads: Lead[] = [];
 
 	const token = () => localStorage.getItem('token') ?? '';
 
@@ -25,21 +27,43 @@
 		} catch (e) {
 			console.warn('Could not load briefing for quick-pick:', e);
 		}
+		try {
+			leads = await loadLeads(token());
+		} catch (e) {
+			console.warn('Could not load leads:', e);
+		}
 	});
 
 	const nowIso = () => new Date().toISOString();
+	const newId = () =>
+		'lead-' + (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.round(Math.random() * 1e6)}`).slice(0, 12);
 
 	const pickExisting = (name: string, id = '') => {
 		setActiveClient({ id: id || '', name, mode: 'existing', since: nowIso() });
 		goto('/apps/data-entry'); // existing → Data Entry & Research
 	};
 
-	const createNew = () => {
+	// Creating a new client creates a persisted LEAD (Stage 1) and opens New Enquiry.
+	const createNew = async () => {
 		const name = query.trim();
 		if (!name) return;
-		setActiveClient({ id: `new:${name.toLowerCase()}`, name, mode: 'new', since: nowIso() });
+		const lead: Lead = { id: newId(), name, createdAt: nowIso(), stage: 'enquiry', enquiry: {} };
+		try {
+			leads = await upsertLead(token(), lead);
+		} catch (e) {
+			console.warn('Could not persist lead:', e);
+		}
+		setActiveClient({ id: lead.id, name, mode: 'new', since: nowIso() });
 		goto('/apps/enquiry'); // new → Stage 1 New Enquiry
 	};
+
+	// Re-open an existing lead to continue its enquiry.
+	const openLead = (lead: Lead) => {
+		setActiveClient({ id: lead.id, name: lead.name, mode: 'new', since: nowIso() });
+		goto('/apps/enquiry');
+	};
+
+	$: openLeads = leads.filter((l) => l.stage === 'enquiry');
 
 	// Instant filter over what we can pick without a live search.
 	$: q = query.trim().toLowerCase();
@@ -120,12 +144,29 @@
 		</section>
 	{/if}
 
-	<!-- New leads (no source yet) -->
+	<!-- New leads — prospects created at Stage 1 (New Enquiry) -->
 	<section>
 		<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">New leads</h2>
-		<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
-			<p class="text-sm text-gray-500">New leads will appear here once enquiries create them (Stage 1).</p>
-		</div>
+		{#if openLeads.filter((l) => !q || l.name.toLowerCase().includes(q)).length}
+			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
+				{#each openLeads.filter((l) => !q || l.name.toLowerCase().includes(q)) as lead}
+					<button
+						on:click={() => openLead(lead)}
+						class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+					>
+						<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-xs font-semibold">
+							{lead.name.slice(0, 1).toUpperCase()}
+						</span>
+						<span class="flex-1 min-w-0 truncate">{lead.name}</span>
+						<span class="text-xs text-gray-400 tabular-nums">{enquiryProgress(lead)}/{ENQUIRY_STEPS.length} enquiry</span>
+					</button>
+				{/each}
+			</div>
+		{:else}
+			<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
+				<p class="text-sm text-gray-500">No new leads yet. Type a new client’s name above to create one.</p>
+			</div>
+		{/if}
 	</section>
 
 	{#if !recentFiltered.length && !attentionFiltered.length && !q}

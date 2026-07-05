@@ -113,6 +113,33 @@ export const saveOverviewSnapshot = async (token: string, snapshot: OverviewSnap
 	}
 };
 
+// --- Generic agent-output access ------------------------------------------
+// For surfaces that just need to read/write a keyed JSON document (e.g. leads).
+
+export const getOutput = async <T = unknown>(token: string, key: string): Promise<T | null> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/outputs/${key}`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (res.status === 404) return null;
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+	return ((await res.json())?.data?.content ?? null) as T | null;
+};
+
+export const putOutput = async (token: string, key: string, kind: string, content: unknown): Promise<void> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/outputs/${key}`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ kind, content })
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+};
+
 // --- New Client Onboarding sessions ---------------------------------------
 // Persisted so the planner can leave the review and return. Stored as one
 // AgentOutput per session at key `onboarding:{sessionId}`.
