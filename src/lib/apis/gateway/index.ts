@@ -45,6 +45,25 @@ export const getBriefing = async (token: string): Promise<DailyBriefing | null> 
 	return (body?.data?.content ?? null) as DailyBriefing | null;
 };
 
+// --- XPLAN connection status (cheap, token-free) --------------------------
+// Probes the debug Chrome via the gateway (no LLM/hermes call). Lets the
+// planner verify the connection without spending tokens; the actual dashboard
+// sync stays a separate, explicit action.
+
+export interface XplanStatus {
+	browserUp: boolean;
+	loggedIn: boolean | null; // null = browser up but can't tell (no XPLAN tab)
+	tabUrl?: string | null;
+}
+
+export const getXplanStatus = async (token: string): Promise<XplanStatus> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/xplan/status`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
+	return (await res.json()) as XplanStatus;
+};
+
 // --- Overview snapshot (last XPLAN sync) ----------------------------------
 // Persist the last "Sync from XPLAN" result so the Overview reloads it on
 // visit instead of forcing the planner to re-run the (slow) live sync.

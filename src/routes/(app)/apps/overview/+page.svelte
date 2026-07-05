@@ -1,51 +1,46 @@
 <script lang="ts">
 	// Overview / Today — Slice 1, Stage B.
-	// Leads with a "Connect to XPLAN" checklist (debug Chrome up → signed in →
-	// guardrail unlocked). Once a sync returns real data the checklist collapses
-	// and the dashboard read is shown. The last sync is persisted, so re-opening
-	// Overview restores it without re-running the (slow) live read.
+	// Two clearly separated actions:
+	//   • "Check connection" — FREE. Probes the debug Chrome via the gateway
+	//     (no LLM), so the planner can confirm they're connected without cost.
+	//   • "Sync from XPLAN"  — spends tokens (hermes reads + summarises the
+	//     dashboard). Only shown once connected, so it's a deliberate, ~1–2×/day
+	//     action, not something that fires on every connection check.
+	// The last sync is persisted and restored on open.
 	import { onMount } from 'svelte';
 	import { syncXplanOverview } from '$lib/apis/xplan';
 	import {
 		getOverviewSnapshot,
 		saveOverviewSnapshot,
 		getGuardrail,
-		setGuardrail
+		setGuardrail,
+		getXplanStatus
 	} from '$lib/apis/gateway';
 
 	let greeting = 'Hello';
 	let today = '';
 
-	type State = 'idle' | 'loading' | 'done' | 'error';
-	let state: State = 'idle';
+	// Sync (token-spending) state.
+	type SyncState = 'idle' | 'loading' | 'done' | 'error';
+	let syncState: SyncState = 'idle';
 	let lines: string[] = [];
+	let syncedAt = ''; // ISO of the last successful sync ('' = never)
 	let errorMsg = '';
-	let syncedAt = ''; // ISO 8601 of the last successful sync ('' = never)
 
-	// Outcome of the most recent sync (or restored snapshot). Drives the
-	// connection checklist below.
-	type Result = 'none' | 'error' | 'notLoggedIn' | 'ok';
-	let lastResult: Result = 'none';
-
-	// Guardrail (XPLAN access) state — step ③.
+	// Connection (free probe) state.
+	let checking = false;
+	let probed = false; // have we run at least one probe this session?
+	let browserUp = false;
+	let loggedIn: boolean | null = null;
 	let guardrailLocked = true;
 	let guardrailBusy = false;
 
 	const token = () => localStorage.getItem('token') ?? '';
 
-	// Derived connection steps ---------------------------------------------
-	// ① browser reachable: hermes got *any* answer (logged-in or not) → up.
-	$: step1 =
-		lastResult === 'ok' || lastResult === 'notLoggedIn'
-			? 'ok'
-			: lastResult === 'error'
-				? 'fail'
-				: 'unknown';
-	// ② signed in: only a real read proves it.
-	$: step2 = lastResult === 'ok' ? 'ok' : lastResult === 'notLoggedIn' ? 'fail' : 'unknown';
-	// ③ guardrail unlocked.
+	$: step1 = !probed ? 'unknown' : browserUp ? 'ok' : 'todo';
+	$: step2 = loggedIn === true ? 'ok' : loggedIn === false ? 'fail' : 'unknown';
 	$: step3 = guardrailLocked ? 'todo' : 'ok';
-	$: connected = lastResult === 'ok';
+	$: connected = browserUp && loggedIn === true && !guardrailLocked;
 
 	const fmtSynced = (iso: string) => {
 		if (!iso) return '';
@@ -56,31 +51,42 @@
 			: d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 	};
 
+	// FREE — no tokens. Probes browser + login + guardrail via the gateway.
+	const checkConnection = async () => {
+		checking = true;
+		try {
+			const [status, locked] = await Promise.all([
+				getXplanStatus(token()).catch(() => ({ browserUp: false, loggedIn: null }) as any),
+				getGuardrail(token()).catch(() => guardrailLocked)
+			]);
+			browserUp = !!status.browserUp;
+			loggedIn = status.loggedIn;
+			guardrailLocked = locked;
+		} finally {
+			probed = true;
+			checking = false;
+		}
+	};
+
 	onMount(async () => {
 		const now = new Date();
 		const h = now.getHours();
 		greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 		today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
-		// Restore the last saved sync.
+		// Restore the last saved sync (free — it's just our own store).
 		try {
 			const snap = await getOverviewSnapshot(token());
 			if (snap) {
 				lines = snap.lines ?? [];
 				syncedAt = snap.syncedAt ?? '';
-				lastResult = snap.notLoggedIn ? 'notLoggedIn' : lines.length ? 'ok' : 'none';
-				state = 'done';
+				if (lines.length) syncState = 'done';
 			}
 		} catch (e) {
 			console.warn('Could not load saved overview snapshot:', e);
 		}
 
-		// Read the guardrail so step ③ reflects reality.
-		try {
-			guardrailLocked = await getGuardrail(token());
-		} catch (e) {
-			console.warn('Could not read guardrail state:', e);
-		}
+		await checkConnection(); // free probe on open
 	});
 
 	const toggleGuardrail = async () => {
@@ -95,33 +101,33 @@
 		}
 	};
 
+	// SPENDS TOKENS — explicit action, only offered once connected.
 	const sync = async () => {
-		state = 'loading';
+		syncState = 'loading';
 		errorMsg = '';
 		try {
 			const t = token();
 			const summary = await syncXplanOverview(t);
 			if (summary.includes('NOT_LOGGED_IN')) {
-				lastResult = 'notLoggedIn';
+				loggedIn = false; // kicks the checklist back open
 				lines = [];
-			} else {
-				lines = summary
-					.split('\n')
-					.map((l) => l.replace(/^[-•*]\s*/, '').trim())
-					.filter((l) => l.length > 0);
-				lastResult = 'ok';
+				syncState = 'idle';
+				return;
 			}
+			lines = summary
+				.split('\n')
+				.map((l) => l.replace(/^[-•*]\s*/, '').trim())
+				.filter((l) => l.length > 0);
 			syncedAt = new Date().toISOString();
-			state = 'done';
+			syncState = 'done';
 			try {
-				await saveOverviewSnapshot(t, { lines, notLoggedIn: lastResult === 'notLoggedIn', syncedAt });
+				await saveOverviewSnapshot(t, { lines, notLoggedIn: false, syncedAt });
 			} catch (e) {
 				console.warn('Could not save overview snapshot:', e);
 			}
 		} catch (e: any) {
 			errorMsg = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
-			lastResult = 'error';
-			state = 'error';
+			syncState = 'error';
 		}
 	};
 </script>
@@ -133,38 +139,51 @@
 			<h1 class="text-2xl font-semibold tracking-tight">{greeting}</h1>
 			<p class="text-sm text-gray-500 mt-1">{today} · Today's overview</p>
 		</div>
-		<button
-			on:click={sync}
-			disabled={state === 'loading'}
-			class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl
-				bg-black text-white dark:bg-white dark:text-black
-				hover:opacity-90 disabled:opacity-50 disabled:cursor-wait transition"
-		>
-			{#if state === 'loading'}
-				<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none">
-					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-				</svg>
-				Reading XPLAN…
-			{:else}
-				{connected ? 'Resync' : 'Connect & sync'}
-			{/if}
-		</button>
+		{#if connected}
+			<button
+				on:click={sync}
+				disabled={syncState === 'loading'}
+				class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl
+					bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 disabled:cursor-wait transition"
+			>
+				{#if syncState === 'loading'}
+					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+					Reading XPLAN…
+				{:else}
+					{lines.length ? 'Resync' : 'Sync from XPLAN'}
+				{/if}
+			</button>
+		{:else}
+			<button
+				on:click={checkConnection}
+				disabled={checking}
+				class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl
+					border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
+			>
+				{#if checking}
+					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+					Checking…
+				{:else}
+					Check connection
+				{/if}
+			</button>
+		{/if}
 	</div>
 
-	<!-- Connect checklist — shown until XPLAN returns a real read -->
+	<!-- Connect checklist — shown until connected -->
 	{#if !connected}
 		<div class="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 mb-5">
 			<h2 class="text-base font-semibold">Connect to XPLAN</h2>
 			<p class="text-sm text-gray-500 mt-1 mb-4">
-				Three quick steps and the agent can read your live XPLAN dashboard.
+				Three quick steps, then <span class="font-medium">Sync from XPLAN</span> reads your dashboard.
+				Checking the connection is free — only syncing uses the AI.
 			</p>
 
 			<ol class="space-y-4">
 				<!-- Step 1: debug browser -->
 				<li class="flex gap-3">
 					<span class="mt-0.5 shrink-0 size-5 rounded-full flex items-center justify-center text-[11px] font-semibold
-						{step1 === 'ok' ? 'bg-green-500 text-white' : step1 === 'fail' ? 'bg-amber-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}">
+						{step1 === 'ok' ? 'bg-green-500 text-white' : step1 === 'todo' ? 'bg-amber-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}">
 						{step1 === 'ok' ? '✓' : '1'}
 					</span>
 					<div class="min-w-0">
@@ -172,8 +191,8 @@
 						{#if step1 !== 'ok'}
 							<p class="text-xs text-gray-500 mt-0.5">Run this once in your terminal, from the project folder:</p>
 							<code class="mt-1.5 block text-xs bg-gray-100 dark:bg-gray-850 rounded-lg px-3 py-2 select-all">./scripts/start-xplan-chrome.sh</code>
-							{#if step1 === 'fail'}
-								<p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">Couldn't reach the browser on the last try — is it running?</p>
+							{#if step1 === 'todo' && probed}
+								<p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">Not detected yet — start it, then Check connection.</p>
 							{/if}
 						{/if}
 					</div>
@@ -189,9 +208,11 @@
 						<p class="text-sm font-medium">Sign in to XPLAN</p>
 						<p class="text-xs text-gray-500 mt-0.5">
 							{#if step2 === 'fail'}
-								The browser is up but not signed in — log into XPLAN in that window.
+								The browser is up but not on a signed-in XPLAN page — log in in that window.
+							{:else if step1 === 'ok' && step2 === 'unknown'}
+								Open XPLAN in the debug window and sign in (no XPLAN tab detected yet).
 							{:else}
-								In the window that opens, sign in to XPLAN as usual (your session stays there).
+								In the window that opens, sign in to XPLAN as usual — your session stays there.
 							{/if}
 						</p>
 					</div>
@@ -223,29 +244,43 @@
 				</li>
 			</ol>
 
-			{#if state === 'error'}
-				<p class="text-xs text-red-600 dark:text-red-400 mt-4">{errorMsg}</p>
+			{#if lines.length}
+				<p class="text-xs text-gray-400 mt-5 pt-4 border-t border-gray-100 dark:border-gray-800">
+					Showing your last sync from {fmtSynced(syncedAt)} below — reconnect to refresh it.
+				</p>
 			{/if}
 		</div>
 	{/if}
 
-	<!-- Dashboard read — shown once connected -->
-	{#if connected}
-		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6 min-h-[10rem]">
+	<!-- Dashboard read — shown when connected, or when we have a saved sync -->
+	{#if connected || lines.length}
+		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6 min-h-[8rem]">
 			<div class="flex items-center justify-between mb-3">
 				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">From your XPLAN dashboard</h2>
 				{#if syncedAt}
 					<span class="text-xs text-gray-400">Last synced {fmtSynced(syncedAt)}</span>
 				{/if}
 			</div>
-			<ul class="space-y-2">
-				{#each lines as line}
-					<li class="flex items-start gap-2.5 text-sm">
-						<span class="mt-1.5 size-1.5 rounded-full bg-gray-400 shrink-0"></span>
-						<span>{line}</span>
-					</li>
-				{/each}
-			</ul>
+
+			{#if syncState === 'error'}
+				<div class="text-sm text-red-600 dark:text-red-400">
+					<p class="font-medium">Couldn't read XPLAN.</p>
+					<p class="mt-1 text-red-500/80">{errorMsg}</p>
+				</div>
+			{:else if lines.length}
+				<ul class="space-y-2">
+					{#each lines as line}
+						<li class="flex items-start gap-2.5 text-sm">
+							<span class="mt-1.5 size-1.5 rounded-full bg-gray-400 shrink-0"></span>
+							<span>{line}</span>
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<p class="text-sm text-gray-500">
+					You're connected. Click <span class="font-medium">Sync from XPLAN</span> to load today's dashboard.
+				</p>
+			{/if}
 		</div>
 	{/if}
 
