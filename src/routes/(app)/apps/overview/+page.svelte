@@ -38,7 +38,11 @@
 	$: step1 = !probed ? 'unknown' : browserUp ? 'ok' : 'todo';
 	$: step2 = loggedIn === true ? 'ok' : loggedIn === false ? 'fail' : 'unknown';
 	$: step3 = guardrailLocked ? 'todo' : 'ok';
-	$: connected = browserUp && loggedIn === true && !guardrailLocked;
+	// Ready to work when the browser is up and access is unlocked. We DON'T require
+	// an already-open signed-in XPLAN tab (loggedIn may be null): the Refresh/Sync
+	// actions navigate to XPLAN themselves and bounce back here (loggedIn=false)
+	// only if the session really isn't authenticated.
+	$: connected = browserUp && loggedIn !== false && !guardrailLocked;
 
 	// --- briefing (live) ---
 	let briefing: DailyBriefing | null = null;
@@ -277,9 +281,49 @@
 		</div>
 	{/if}
 
-	<!-- Briefing agenda (primary) — shown when connected or we have a saved one -->
-	{#if connected || !briefingEmpty}
+	<!-- Dashboard read — shown when connected or we have a saved read -->
+	{#if connected || lines.length}
 		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6 mb-5">
+			<div class="flex items-center justify-between mb-3">
+				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Dashboard read</h2>
+				<div class="flex items-center gap-3">
+					{#if syncedAt}<span class="text-xs text-gray-400">{fmt(syncedAt)}</span>{/if}
+					{#if connected}
+						<button
+							on:click={syncDashboard}
+							disabled={syncState === 'loading'}
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 disabled:opacity-50 disabled:cursor-wait transition"
+						>
+							{#if syncState === 'loading'}
+								<svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+								Reading…
+							{:else}
+								{lines.length ? 'Resync' : 'Sync'}
+							{/if}
+						</button>
+					{/if}
+				</div>
+			</div>
+			{#if syncState === 'error'}
+				<p class="text-sm text-red-600 dark:text-red-400">{syncErr}</p>
+			{:else if lines.length}
+				<ul class="space-y-2">
+					{#each lines as line}
+						<li class="flex items-start gap-2.5 text-sm">
+							<span class="mt-1.5 size-1.5 rounded-full bg-gray-400 shrink-0"></span>
+							<span>{line}</span>
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<p class="text-sm text-gray-500">A plain read of your XPLAN dashboard shell — click Sync to refresh.</p>
+			{/if}
+		</div>
+	{/if}
+
+	<!-- Briefing agenda — shown when connected or we have a saved one -->
+	{#if connected || !briefingEmpty}
+		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6">
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Today's briefing</h2>
 				<div class="flex items-center gap-3">
@@ -330,46 +374,6 @@
 						{/if}
 					{/each}
 				</div>
-			{/if}
-		</div>
-	{/if}
-
-	<!-- Dashboard read (secondary) — shown when connected or we have a saved read -->
-	{#if connected || lines.length}
-		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6">
-			<div class="flex items-center justify-between mb-3">
-				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Dashboard read</h2>
-				<div class="flex items-center gap-3">
-					{#if syncedAt}<span class="text-xs text-gray-400">{fmt(syncedAt)}</span>{/if}
-					{#if connected}
-						<button
-							on:click={syncDashboard}
-							disabled={syncState === 'loading'}
-							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 disabled:opacity-50 disabled:cursor-wait transition"
-						>
-							{#if syncState === 'loading'}
-								<svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-								Reading…
-							{:else}
-								{lines.length ? 'Resync' : 'Sync'}
-							{/if}
-						</button>
-					{/if}
-				</div>
-			</div>
-			{#if syncState === 'error'}
-				<p class="text-sm text-red-600 dark:text-red-400">{syncErr}</p>
-			{:else if lines.length}
-				<ul class="space-y-2">
-					{#each lines as line}
-						<li class="flex items-start gap-2.5 text-sm">
-							<span class="mt-1.5 size-1.5 rounded-full bg-gray-400 shrink-0"></span>
-							<span>{line}</span>
-						</li>
-					{/each}
-				</ul>
-			{:else}
-				<p class="text-sm text-gray-500">A plain read of your XPLAN dashboard shell — click Sync to refresh.</p>
 			{/if}
 		</div>
 	{/if}
