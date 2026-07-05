@@ -153,10 +153,10 @@
 <div class="max-w-4xl mx-auto px-8 py-10">
 	<!-- Header + step indicator -->
 	<div class="mb-8">
-		<h1 class="text-2xl font-semibold tracking-tight">New Client Onboarding</h1>
+		<h1 class="text-2xl font-semibold tracking-tight">Data Entry &amp; Research</h1>
 		<p class="text-sm text-gray-500 mt-1">
-			Upload a client’s documents; the agent proposes what to enter into XPLAN. You approve every
-			item — nothing is written without your say-so.
+			Stage 3 · Upload a client’s documents; the agent proposes what to enter into XPLAN. You approve
+			every item — nothing is written without your say-so.
 		</p>
 		<div class="flex items-center gap-2 mt-5 text-xs font-medium">
 			{#each [['start', 'Start'], ['upload', 'Upload'], ['review', 'Review'], ['write', 'Write']] as [key, label], i}

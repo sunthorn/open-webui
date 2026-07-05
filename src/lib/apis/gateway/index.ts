@@ -45,6 +45,19 @@ export const getBriefing = async (token: string): Promise<DailyBriefing | null> 
 	return (body?.data?.content ?? null) as DailyBriefing | null;
 };
 
+/** Upsert the planner's daily briefing (used by the live "Refresh from XPLAN"). */
+export const saveBriefing = async (token: string, briefing: DailyBriefing): Promise<void> => {
+	const res = await fetch(`${GATEWAY_URL}/gw/outputs/briefing:daily`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ kind: 'briefing', content: briefing })
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+};
+
 // --- XPLAN connection status (cheap, token-free) --------------------------
 // Probes the debug Chrome via the gateway (no LLM/hermes call). Lets the
 // planner verify the connection without spending tokens; the actual dashboard
