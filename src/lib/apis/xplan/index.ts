@@ -154,6 +154,76 @@ export const searchXplanClients = async (
 	}
 };
 
+// --- Client book sync -----------------------------------------------------
+// Navigate the deterministic client-results URL (which RENDERS the list — no
+// search form to operate, unlike the flaky live search) and extract the table.
+// Single page for now (~100 rows); pagination added once extraction is proven.
+
+const CLIENT_BOOK_PROMPT = [
+	'You are connected to a browser already logged in to XPLAN (IRESS) for a',
+	'financial planner.',
+	'',
+	'Do EXACTLY this: call browser_navigate ONCE to',
+	'https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client',
+	'then read the CLIENT RESULTS TABLE on that page.',
+	'',
+	'Return STRICT JSON ONLY (no prose, no code fences): an array of the client',
+	'rows visible on this page, each {"name":"<display name>","id":"<entity id',
+	'from the row link href if present, else empty>"}. Include every row (up to ~100).',
+	'',
+	'If you are not logged in, reply exactly: NOT_LOGGED_IN',
+	'Do NOT paginate, do NOT open client pages, do NOT use browser_cdp /',
+	'execute_code / browser_snapshot. Do not loop.'
+].join('\n');
+
+/**
+ * Sync one page of the XPLAN client book via hermes.
+ * @returns client rows (possibly empty), or the sentinel 'NOT_LOGGED_IN'.
+ */
+export const gatherXplanClientPage = async (
+	token: string,
+	timeoutMs = 120_000
+): Promise<XplanClient[] | 'NOT_LOGGED_IN'> => {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const res = await fetch(`${WEBUI_BASE_URL}/openai/chat/completions`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				model: 'hermes-agent',
+				messages: [{ role: 'user', content: CLIENT_BOOK_PROMPT }],
+				stream: false
+			}),
+			signal: controller.signal
+		});
+		if (!res.ok) {
+			const detail = await res.json().catch(() => ({}));
+			throw new Error(detail?.detail ?? detail?.error ?? `HTTP ${res.status}`);
+		}
+		const data = await res.json();
+		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
+		if (raw.includes('NOT_LOGGED_IN')) return 'NOT_LOGGED_IN';
+		const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(jsonText);
+		} catch {
+			throw new Error('XPLAN returned an unexpected format while syncing clients. Try again.');
+		}
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+			.map((c) => ({ name: String(c.name ?? '').trim(), id: String(c.id ?? '') }))
+			.filter((c) => c.name.length > 0);
+	} catch (e: any) {
+		if (e?.name === 'AbortError') throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s syncing clients.`);
+		throw e;
+	} finally {
+		clearTimeout(timer);
+	}
+};
+
 // --- Live briefing (Build B) ----------------------------------------------
 // Gather today's real tasks/diary from the logged-in XPLAN (via hermes), then
 // bucket into horizons (ported from scripts/build-briefing.py compute()). This

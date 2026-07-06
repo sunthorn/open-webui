@@ -1,56 +1,89 @@
 <script lang="ts">
-	// Clients — the hub for choosing who the planner works on. Search or create a
-	// client; quick-pick from Recent and Needs-attention. Selecting sets the
-	// global active client and jumps to the right stage (new → Enquiry,
-	// existing → Data Entry).
+	// Clients — the hub for choosing who the planner works on.
+	// Model: SYNC the XPLAN client book into axi (manual "Sync client book"),
+	// then search it LOCALLY (instant, free). Also quick-pick Recent, Needs-
+	// attention (from the briefing), and New leads. Selecting sets the global
+	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getBriefing } from '$lib/apis/gateway';
+	import { getBriefing, getOutput, putOutput } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
-	import { searchXplanClients, type XplanClient } from '$lib/apis/xplan';
+	import { gatherXplanClientPage, type XplanClient } from '$lib/apis/xplan';
 
 	let query = '';
-	let attention: string[] = []; // client names surfaced from the briefing
+	let attention: string[] = [];
 	let leads: Lead[] = [];
 
-	// Live XPLAN search (token-spending, browser-driven).
-	let xplanResults: XplanClient[] = [];
-	let searching = false;
-	let searchErr = '';
-	let searchedFor = '';
+	// The synced XPLAN client book (local copy).
+	let book: XplanClient[] = [];
+	let bookSyncedAt = '';
+	let syncing = false;
+	let syncErr = '';
 
 	const token = () => localStorage.getItem('token') ?? '';
+	const nowIso = () => new Date().toISOString();
+	const newId = () =>
+		'lead-' + (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.round(Math.random() * 1e6)}`).slice(0, 12);
+
+	const fmt = (iso: string) => {
+		if (!iso) return '';
+		const d = new Date(iso);
+		return d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+	};
 
 	onMount(async () => {
 		try {
 			const b = await getBriefing(token());
 			if (b) {
-				const names = [...b.needsAttention, ...b.today]
-					.map((i) => i.client)
-					.filter((c): c is string => !!c);
+				const names = [...b.needsAttention, ...b.today].map((i) => i.client).filter((c): c is string => !!c);
 				attention = Array.from(new Set(names));
 			}
 		} catch (e) {
-			console.warn('Could not load briefing for quick-pick:', e);
+			console.warn('briefing:', e);
 		}
 		try {
 			leads = await loadLeads(token());
 		} catch (e) {
-			console.warn('Could not load leads:', e);
+			console.warn('leads:', e);
+		}
+		try {
+			const doc = await getOutput<{ clients: XplanClient[]; syncedAt: string }>(token(), 'clients');
+			if (doc) {
+				book = doc.clients ?? [];
+				bookSyncedAt = doc.syncedAt ?? '';
+			}
+		} catch (e) {
+			console.warn('client book:', e);
 		}
 	});
 
-	const nowIso = () => new Date().toISOString();
-	const newId = () =>
-		'lead-' + (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.round(Math.random() * 1e6)}`).slice(0, 12);
+	// Manual sync — pulls a page of the XPLAN client book into axi (token-spending).
+	const syncBook = async () => {
+		if (syncing) return;
+		syncing = true;
+		syncErr = '';
+		try {
+			const res = await gatherXplanClientPage(token());
+			if (res === 'NOT_LOGGED_IN') {
+				syncErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then sync.';
+			} else {
+				book = res;
+				bookSyncedAt = nowIso();
+				await putOutput(token(), 'clients', 'client_book', { clients: book, syncedAt: bookSyncedAt });
+			}
+		} catch (e: any) {
+			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
+		} finally {
+			syncing = false;
+		}
+	};
 
 	const pickExisting = (name: string, id = '') => {
 		setActiveClient({ id: id || '', name, mode: 'existing', since: nowIso() });
-		goto('/apps/data-entry'); // existing → Data Entry & Research
+		goto('/apps/data-entry');
 	};
 
-	// Creating a new client creates a persisted LEAD (Stage 1) and opens New Enquiry.
 	const createNew = async () => {
 		const name = query.trim();
 		if (!name) return;
@@ -58,61 +91,56 @@
 		try {
 			leads = await upsertLead(token(), lead);
 		} catch (e) {
-			console.warn('Could not persist lead:', e);
+			console.warn('persist lead:', e);
 		}
 		setActiveClient({ id: lead.id, name, mode: 'new', since: nowIso() });
-		goto('/apps/enquiry'); // new → Stage 1 New Enquiry
+		goto('/apps/enquiry');
 	};
 
-	// Re-open an existing lead to continue its enquiry.
 	const openLead = (lead: Lead) => {
 		setActiveClient({ id: lead.id, name: lead.name, mode: 'new', since: nowIso() });
 		goto('/apps/enquiry');
 	};
 
-	// Live-search the real XPLAN client book (via hermes). Explicit + token-spending.
-	const searchXplan = async () => {
-		const term = query.trim();
-		if (!term || searching) return;
-		searching = true;
-		searchErr = '';
-		xplanResults = [];
-		searchedFor = term;
-		try {
-			const res = await searchXplanClients(token(), term);
-			if (res === 'NOT_LOGGED_IN') {
-				searchErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then search again.';
-			} else {
-				xplanResults = res;
-			}
-		} catch (e: any) {
-			searchErr = typeof e === 'string' ? e : (e?.message ?? 'XPLAN search failed');
-		} finally {
-			searching = false;
-		}
-	};
-
-	// Pick a real XPLAN client → work on them in Data Entry & Research.
-	const pickXplan = (c: XplanClient) => {
-		setActiveClient({ id: c.id || '', name: c.name, mode: 'existing', since: nowIso() });
-		goto('/apps/data-entry');
-	};
-
-	$: openLeads = leads.filter((l) => l.stage === 'enquiry');
-
-	// Instant filter over what we can pick without a live search.
 	$: q = query.trim().toLowerCase();
+	$: bookFiltered = q ? book.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 50) : [];
 	$: recentFiltered = $recentClients.filter((c) => !q || c.name.toLowerCase().includes(q));
 	$: attentionFiltered = attention.filter((n) => !q || n.toLowerCase().includes(q));
+	$: openLeads = leads.filter((l) => l.stage === 'enquiry');
 </script>
 
 <div class="max-w-3xl mx-auto px-8 py-10">
-	<div class="mb-6">
-		<h1 class="text-2xl font-semibold tracking-tight">Clients</h1>
-		<p class="text-sm text-gray-500 mt-1">Search for a client to work on, or create a new one.</p>
+	<div class="flex items-start justify-between gap-4 mb-6">
+		<div>
+			<h1 class="text-2xl font-semibold tracking-tight">Clients</h1>
+			<p class="text-sm text-gray-500 mt-1">Search your synced XPLAN book, or create a new client.</p>
+		</div>
+		<button
+			on:click={syncBook}
+			disabled={syncing}
+			class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
+		>
+			{#if syncing}
+				<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+				Syncing…
+			{:else}
+				Sync client book
+			{/if}
+		</button>
 	</div>
 
-	<!-- Search / create -->
+	<!-- Sync status -->
+	<p class="text-xs text-gray-400 mb-4">
+		{#if syncErr}
+			<span class="text-red-500">{syncErr}</span>
+		{:else if book.length}
+			{book.length} clients synced{bookSyncedAt ? ` · ${fmt(bookSyncedAt)}` : ''}. Searching your local copy.
+		{:else}
+			Client book not synced yet — click <span class="font-medium">Sync client book</span> to pull your XPLAN clients in (needs XPLAN connected on Home).
+		{/if}
+	</p>
+
+	<!-- Search -->
 	<div class="relative mb-3">
 		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" class="size-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
 			<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -121,61 +149,37 @@
 			bind:value={query}
 			placeholder="Search by client name, or type a new client’s name…"
 			class="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-11 pr-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
-			on:keydown={(e) => e.key === 'Enter' && q && searchXplan()}
 		/>
 	</div>
 
-	<!-- Actions when there's a query: search the live XPLAN book, or create new -->
+	<!-- Create-new affordance -->
 	{#if q}
-		<div class="flex flex-col gap-2 mb-6">
-			<button
-				on:click={searchXplan}
-				disabled={searching}
-				class="w-full flex items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
-			>
-				<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center shrink-0">
-					{#if searching}
-						<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-					{:else}
-						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-					{/if}
-				</span>
-				<span>{searching ? `Searching XPLAN for “${searchedFor}”…` : `Search XPLAN for “${query.trim()}”`}</span>
-			</button>
-			<button
-				on:click={createNew}
-				class="w-full flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-			>
-				<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none shrink-0">+</span>
-				<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
-			</button>
-		</div>
+		<button
+			on:click={createNew}
+			class="w-full flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 transition mb-6"
+		>
+			<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none shrink-0">+</span>
+			<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
+		</button>
 	{/if}
 
-	<!-- Live XPLAN results -->
-	{#if searchErr}
-		<div class="mb-6 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">{searchErr}</div>
-	{:else if xplanResults.length}
+	<!-- Client book results (local) -->
+	{#if q && bookFiltered.length}
 		<section class="mb-6">
-			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">From XPLAN · “{searchedFor}”</h2>
+			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Clients · {bookFiltered.length}{bookFiltered.length === 50 ? '+' : ''}</h2>
 			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
-				{#each xplanResults as c}
-					<button
-						on:click={() => pickXplan(c)}
-						class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-					>
-						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">
-							{c.name.slice(0, 1).toUpperCase()}
-						</span>
+				{#each bookFiltered as c}
+					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
+						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">{c.name.slice(0, 1).toUpperCase()}</span>
 						<span class="flex-1 min-w-0 truncate">{c.name}</span>
 						{#if c.id}<span class="text-[10px] text-gray-400 tabular-nums">id {c.id}</span>{/if}
 					</button>
 				{/each}
 			</div>
 		</section>
-	{:else if searchedFor && !searching}
+	{:else if q && book.length && !bookFiltered.length}
 		<div class="mb-6 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-4 text-center text-sm text-gray-500">
-			No XPLAN clients matched “{searchedFor}”. You can create a new client above.
+			No synced client matched “{query.trim()}”. Create a new client above, or re-sync the book.
 		</div>
 	{/if}
 
@@ -185,32 +189,23 @@
 			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Recent</h2>
 			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
 				{#each recentFiltered as c}
-					<button
-						on:click={() => pickExisting(c.name, c.id)}
-						class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-					>
-						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold">
-							{c.name.slice(0, 1).toUpperCase()}
-						</span>
+					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
+						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">{c.name.slice(0, 1).toUpperCase()}</span>
 						<span class="flex-1 min-w-0 truncate {$activeClient && $activeClient.name === c.name ? 'font-semibold' : ''}">{c.name}</span>
 						{#if c.mode === 'new'}<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">new</span>{/if}
-						{#if $activeClient && $activeClient.name === c.name}<span class="text-[10px] text-gray-400">active</span>{/if}
 					</button>
 				{/each}
 			</div>
 		</section>
 	{/if}
 
-	<!-- Needs attention (from today's briefing) -->
+	<!-- Needs attention -->
 	{#if attentionFiltered.length}
 		<section class="mb-6">
 			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Needs attention · from today’s briefing</h2>
 			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
 				{#each attentionFiltered as name}
-					<button
-						on:click={() => pickExisting(name)}
-						class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-					>
+					<button on:click={() => pickExisting(name)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
 						<span class="size-1.5 rounded-full bg-red-500 shrink-0"></span>
 						<span class="flex-1 min-w-0 truncate">{name}</span>
 					</button>
@@ -219,19 +214,14 @@
 		</section>
 	{/if}
 
-	<!-- New leads — prospects created at Stage 1 (New Enquiry) -->
+	<!-- New leads -->
 	<section>
 		<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">New leads</h2>
 		{#if openLeads.filter((l) => !q || l.name.toLowerCase().includes(q)).length}
 			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
 				{#each openLeads.filter((l) => !q || l.name.toLowerCase().includes(q)) as lead}
-					<button
-						on:click={() => openLead(lead)}
-						class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-					>
-						<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-xs font-semibold">
-							{lead.name.slice(0, 1).toUpperCase()}
-						</span>
+					<button on:click={() => openLead(lead)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
+						<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-xs font-semibold shrink-0">{lead.name.slice(0, 1).toUpperCase()}</span>
 						<span class="flex-1 min-w-0 truncate">{lead.name}</span>
 						<span class="text-xs text-gray-400 tabular-nums">{enquiryProgress(lead)}/{ENQUIRY_STEPS.length} enquiry</span>
 					</button>
@@ -243,11 +233,4 @@
 			</div>
 		{/if}
 	</section>
-
-	{#if !recentFiltered.length && !attentionFiltered.length && !q}
-		<p class="text-xs text-gray-400 mt-6">
-			No recent clients yet. Search a name, or type a new client’s name to create one.
-			Full XPLAN search comes with the live client lookup.
-		</p>
-	{/if}
 </div>
