@@ -79,6 +79,81 @@ export const syncXplanOverview = async (token: string, timeoutMs = 90_000): Prom
 	}
 };
 
+// --- Live client search ---------------------------------------------------
+// Search the planner's real XPLAN client book (via hermes) and return matches.
+// Token-spending + browser-driven, so it's an explicit action, not per-keystroke.
+
+export interface XplanClient {
+	name: string;
+	id: string; // XPLAN entity id if extractable, else ''
+}
+
+const clientSearchPrompt = (query: string): string =>
+	[
+		'You are connected to a browser already logged in to XPLAN (IRESS financial',
+		'planning software) for a financial planner.',
+		'',
+		`Find clients whose name matches "${query}".`,
+		'Use the client search (the Clients search under factfind — e.g.',
+		'https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client ),',
+		`enter "${query}" as the name/keyword, run the search, and read the results.`,
+		'',
+		'Return STRICT JSON ONLY (no prose, no code fences): an array of up to 25',
+		'matches, each {"name":"<display name>","id":"<entity id from the row link, or empty>"}.',
+		`Only include clients whose name actually matches "${query}". If none, return: []`,
+		'If you are not logged in, reply exactly: NOT_LOGGED_IN',
+		'Do not open individual client pages. Keep it to a single search; do not loop.'
+	].join('\n');
+
+/**
+ * Search XPLAN clients by name via hermes.
+ * @returns matches (possibly empty), or the sentinel 'NOT_LOGGED_IN'.
+ */
+export const searchXplanClients = async (
+	token: string,
+	query: string,
+	timeoutMs = 120_000
+): Promise<XplanClient[] | 'NOT_LOGGED_IN'> => {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const res = await fetch(`${WEBUI_BASE_URL}/openai/chat/completions`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				model: 'hermes-agent',
+				messages: [{ role: 'user', content: clientSearchPrompt(query) }],
+				stream: false
+			}),
+			signal: controller.signal
+		});
+		if (!res.ok) {
+			const detail = await res.json().catch(() => ({}));
+			throw new Error(detail?.detail ?? detail?.error ?? `HTTP ${res.status}`);
+		}
+		const data = await res.json();
+		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
+		if (raw.includes('NOT_LOGGED_IN')) return 'NOT_LOGGED_IN';
+		const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(jsonText);
+		} catch {
+			throw new Error('XPLAN returned an unexpected format while searching. Try again.');
+		}
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+			.map((c) => ({ name: String(c.name ?? '').trim(), id: String(c.id ?? '') }))
+			.filter((c) => c.name.length > 0);
+	} catch (e: any) {
+		if (e?.name === 'AbortError') throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s searching XPLAN.`);
+		throw e;
+	} finally {
+		clearTimeout(timer);
+	}
+};
+
 // --- Live briefing (Build B) ----------------------------------------------
 // Gather today's real tasks/diary from the logged-in XPLAN (via hermes), then
 // bucket into horizons (ported from scripts/build-briefing.py compute()). This

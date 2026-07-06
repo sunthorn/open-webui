@@ -8,10 +8,17 @@
 	import { getBriefing } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
+	import { searchXplanClients, type XplanClient } from '$lib/apis/xplan';
 
 	let query = '';
 	let attention: string[] = []; // client names surfaced from the briefing
 	let leads: Lead[] = [];
+
+	// Live XPLAN search (token-spending, browser-driven).
+	let xplanResults: XplanClient[] = [];
+	let searching = false;
+	let searchErr = '';
+	let searchedFor = '';
 
 	const token = () => localStorage.getItem('token') ?? '';
 
@@ -63,15 +70,40 @@
 		goto('/apps/enquiry');
 	};
 
+	// Live-search the real XPLAN client book (via hermes). Explicit + token-spending.
+	const searchXplan = async () => {
+		const term = query.trim();
+		if (!term || searching) return;
+		searching = true;
+		searchErr = '';
+		xplanResults = [];
+		searchedFor = term;
+		try {
+			const res = await searchXplanClients(token(), term);
+			if (res === 'NOT_LOGGED_IN') {
+				searchErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then search again.';
+			} else {
+				xplanResults = res;
+			}
+		} catch (e: any) {
+			searchErr = typeof e === 'string' ? e : (e?.message ?? 'XPLAN search failed');
+		} finally {
+			searching = false;
+		}
+	};
+
+	// Pick a real XPLAN client → work on them in Data Entry & Research.
+	const pickXplan = (c: XplanClient) => {
+		setActiveClient({ id: c.id || '', name: c.name, mode: 'existing', since: nowIso() });
+		goto('/apps/data-entry');
+	};
+
 	$: openLeads = leads.filter((l) => l.stage === 'enquiry');
 
 	// Instant filter over what we can pick without a live search.
 	$: q = query.trim().toLowerCase();
 	$: recentFiltered = $recentClients.filter((c) => !q || c.name.toLowerCase().includes(q));
 	$: attentionFiltered = attention.filter((n) => !q || n.toLowerCase().includes(q));
-	$: exactExists =
-		q.length > 0 &&
-		($recentClients.some((c) => c.name.toLowerCase() === q) || attention.some((n) => n.toLowerCase() === q));
 </script>
 
 <div class="max-w-3xl mx-auto px-8 py-10">
@@ -89,19 +121,62 @@
 			bind:value={query}
 			placeholder="Search by client name, or type a new client’s name…"
 			class="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-11 pr-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
-			on:keydown={(e) => e.key === 'Enter' && q && !exactExists && createNew()}
+			on:keydown={(e) => e.key === 'Enter' && q && searchXplan()}
 		/>
 	</div>
 
-	<!-- Create-new affordance when the typed name isn't an existing pick -->
-	{#if q && !exactExists}
-		<button
-			on:click={createNew}
-			class="w-full flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 transition mb-6"
-		>
-			<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none">+</span>
-			<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
-		</button>
+	<!-- Actions when there's a query: search the live XPLAN book, or create new -->
+	{#if q}
+		<div class="flex flex-col gap-2 mb-6">
+			<button
+				on:click={searchXplan}
+				disabled={searching}
+				class="w-full flex items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
+			>
+				<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center shrink-0">
+					{#if searching}
+						<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+					{:else}
+						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" class="size-4"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+					{/if}
+				</span>
+				<span>{searching ? `Searching XPLAN for “${searchedFor}”…` : `Search XPLAN for “${query.trim()}”`}</span>
+			</button>
+			<button
+				on:click={createNew}
+				class="w-full flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+			>
+				<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none shrink-0">+</span>
+				<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
+			</button>
+		</div>
+	{/if}
+
+	<!-- Live XPLAN results -->
+	{#if searchErr}
+		<div class="mb-6 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">{searchErr}</div>
+	{:else if xplanResults.length}
+		<section class="mb-6">
+			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">From XPLAN · “{searchedFor}”</h2>
+			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
+				{#each xplanResults as c}
+					<button
+						on:click={() => pickXplan(c)}
+						class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+					>
+						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">
+							{c.name.slice(0, 1).toUpperCase()}
+						</span>
+						<span class="flex-1 min-w-0 truncate">{c.name}</span>
+						{#if c.id}<span class="text-[10px] text-gray-400 tabular-nums">id {c.id}</span>{/if}
+					</button>
+				{/each}
+			</div>
+		</section>
+	{:else if searchedFor && !searching}
+		<div class="mb-6 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-4 text-center text-sm text-gray-500">
+			No XPLAN clients matched “{searchedFor}”. You can create a new client above.
+		</div>
 	{/if}
 
 	<!-- Recent -->
