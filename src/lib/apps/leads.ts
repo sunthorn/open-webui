@@ -13,13 +13,28 @@ export const ENQUIRY_STEPS = [
 	{ id: 'book', title: 'Book Discovery Meeting', detail: 'Schedule the discovery meeting in the diary.' }
 ] as const;
 
+// The Stage 2 checklist.
+export const DISCOVERY_STEPS = [
+	{ id: 'goals', title: 'Clarify Goals', detail: 'What does the client want to achieve, and by when.' },
+	{ id: 'collect', title: 'Collect Information', detail: 'Assets, liabilities, income, insurance, super.' },
+	{ id: 'scope', title: 'Define Scope', detail: 'Agree what the advice will and won’t cover.' },
+	{ id: 'risk', title: 'Risk Profiling', detail: 'Assess risk tolerance and capacity.' }
+] as const;
+
 export interface Lead {
 	id: string;
 	name: string;
 	createdAt: string; // ISO
 	stage: 'enquiry' | 'discovery' | 'data-entry';
 	enquiry: Record<string, boolean>; // step id → done
+	discovery?: Record<string, boolean>;
 }
+
+/** Count completed steps in a checklist map. */
+export const countDone = (
+	steps: readonly { id: string }[],
+	map: Record<string, boolean> | undefined
+): number => steps.filter((s) => map?.[s.id]).length;
 
 const KEY = 'leads';
 
