@@ -72,10 +72,15 @@ const FIELD_TAXONOMY = [
 	'Risk → RiskProfile: category | Dependants → Dependant: name+DOB+relationship | Goals → Goal: text'
 ].join('\n');
 
+// Strip quotes/backticks/newlines from values interpolated into the prompt so
+// an odd/malicious client name can't break out of the string or inject extra
+// instructions into the prompt template.
+const safe = (s: string): string => s.replace(/["'`\r\n]/g, ' ').trim();
+
 const buildPrompt = (clientName: string, docs: ExtractedDoc[]): string =>
 	[
 		'You are a data-entry assistant for an Australian financial planner. You are',
-		`preparing to onboard a new client named "${clientName}" into XPLAN (IRESS).`,
+		`preparing to onboard a new client named "${safe(clientName)}" into XPLAN (IRESS).`,
 		'',
 		'From the DOCUMENTS below, extract every fact that maps onto this XPLAN field',
 		'taxonomy (section → resource: fields):',

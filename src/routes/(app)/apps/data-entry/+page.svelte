@@ -115,10 +115,20 @@
 		if (item.status === 'proposed') item.status = 'edited';
 		proposal = proposal;
 	};
+	// True for sensitive fields (TFN / ID numbers) that must never be bulk-approved.
+	const isSensitive = (it: ProposalItem) => {
+		const hay = `${it.field ?? ''} ${it.xplanField ?? ''}`.toLowerCase();
+		return hay.includes('tfn') || hay.includes('id');
+	};
+	// "Approve all" is a convenience, not a rubber stamp: it only approves items
+	// the agent is reasonably sure about (confidence >= 0.5) and that aren't
+	// sensitive (TFN / ID fields). Low-confidence and sensitive items stay
+	// 'proposed' so the planner must review and approve them individually.
 	const approveAll = () => {
 		if (!proposal) return;
 		proposal.items.forEach((it) => {
-			if (it.status !== 'rejected') it.status = 'approved';
+			if (it.status === 'rejected') return;
+			if ((it.confidence ?? 1) >= 0.5 && !isSensitive(it)) it.status = 'approved';
 		});
 		proposal = proposal;
 	};

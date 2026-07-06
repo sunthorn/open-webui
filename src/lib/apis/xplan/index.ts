@@ -88,22 +88,29 @@ export interface XplanClient {
 	id: string; // XPLAN entity id if extractable, else ''
 }
 
-const clientSearchPrompt = (query: string): string =>
-	[
+// Strip quotes/backticks/newlines from values interpolated into prompt text so
+// a malicious/odd query can't break out of the surrounding string or inject
+// extra instructions into the prompt template.
+const safe = (s: string): string => s.replace(/["'`\r\n]/g, ' ').trim();
+
+const clientSearchPrompt = (query: string): string => {
+	const q = safe(query);
+	return [
 		'You are connected to a browser already logged in to XPLAN (IRESS financial',
 		'planning software) for a financial planner.',
 		'',
-		`Find clients whose name matches "${query}".`,
+		`Find clients whose name matches "${q}".`,
 		'Use the client search (the Clients search under factfind — e.g.',
 		'https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client ),',
-		`enter "${query}" as the name/keyword, run the search, and read the results.`,
+		`enter "${q}" as the name/keyword, run the search, and read the results.`,
 		'',
 		'Return STRICT JSON ONLY (no prose, no code fences): an array of up to 25',
 		'matches, each {"name":"<display name>","id":"<entity id from the row link, or empty>"}.',
-		`Only include clients whose name actually matches "${query}". If none, return: []`,
+		`Only include clients whose name actually matches "${q}". If none, return: []`,
 		'If you are not logged in, reply exactly: NOT_LOGGED_IN',
 		'Do not open individual client pages. Keep it to a single search; do not loop.'
 	].join('\n');
+};
 
 /**
  * Search XPLAN clients by name via hermes.
@@ -372,7 +379,21 @@ export const gatherXplanBriefing = async (token: string, timeoutMs = 120_000): P
 		} catch {
 			throw new Error('XPLAN returned an unexpected format while reading tasks. Try again.');
 		}
-		return Array.isArray(parsed) ? (parsed as RawBriefingItem[]) : [];
+		if (!Array.isArray(parsed)) return [];
+		// Coerce/validate each field (like searchXplanClients / proposeMapping) so
+		// malformed model output can't leak `[object Object]` / `Invalid Date`
+		// into computeBriefing. Drop non-objects and items without a title.
+		return parsed
+			.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+			.map((x) => ({
+				title: String(x.title ?? ''),
+				client: x.client ? String(x.client) : undefined,
+				detail: x.detail ? String(x.detail) : undefined,
+				dueAt: x.dueAt ? String(x.dueAt) : undefined,
+				time: x.time ? String(x.time) : undefined,
+				done: !!x.done
+			}))
+			.filter((x) => x.title.trim().length > 0);
 	} catch (e: any) {
 		if (e?.name === 'AbortError') throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s reading XPLAN tasks.`);
 		throw e;

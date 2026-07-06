@@ -2,9 +2,12 @@
 // The browser talks ONLY to the gateway; it verifies the OWUI session token
 // (sent as Bearer) with security-layer and derives `owner` server-side.
 //
-// GATEWAY_URL: dev = same host, port 8200. TODO(prod): make this configurable
-// / serve the gateway same-origin behind a reverse proxy so this isn't hard-set.
-const GATEWAY_URL = 'http://localhost:8200';
+// Gateway shares the app's host on port 8200. TODO(prod): serve same-origin
+// behind a reverse proxy so this port/scheme assumption goes away.
+// Derived from the current page's hostname at runtime so opening the app from
+// another host doesn't wrongly resolve `localhost` to the *user's* machine.
+const gatewayUrl = () =>
+	(typeof window !== 'undefined' ? `http://${window.location.hostname}:8200` : 'http://localhost:8200');
 
 // Mirrors shared-contracts/api-responses.ts (DailyBriefing). Kept local until
 // the shared-types build-context gap is resolved — must stay in sync.
@@ -33,7 +36,7 @@ export interface DailyBriefing {
 
 /** GET the planner's daily briefing. Returns null if none has been built yet. */
 export const getBriefing = async (token: string): Promise<DailyBriefing | null> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/briefing:daily`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/briefing:daily`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (res.status === 404) return null; // not built yet
@@ -47,7 +50,7 @@ export const getBriefing = async (token: string): Promise<DailyBriefing | null> 
 
 /** Upsert the planner's daily briefing (used by the live "Refresh from XPLAN"). */
 export const saveBriefing = async (token: string, briefing: DailyBriefing): Promise<void> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/briefing:daily`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/briefing:daily`, {
 		method: 'PUT',
 		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ kind: 'briefing', content: briefing })
@@ -70,7 +73,7 @@ export interface XplanStatus {
 }
 
 export const getXplanStatus = async (token: string): Promise<XplanStatus> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/xplan/status`, {
+	const res = await fetch(`${gatewayUrl()}/gw/xplan/status`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
@@ -89,7 +92,7 @@ export interface OverviewSnapshot {
 
 /** Load the last saved Overview snapshot, or null if none exists yet. */
 export const getOverviewSnapshot = async (token: string): Promise<OverviewSnapshot | null> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/overview:xplan`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/overview:xplan`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (res.status === 404) return null;
@@ -102,7 +105,7 @@ export const getOverviewSnapshot = async (token: string): Promise<OverviewSnapsh
 
 /** Save the latest Overview snapshot. */
 export const saveOverviewSnapshot = async (token: string, snapshot: OverviewSnapshot): Promise<void> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/overview:xplan`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/overview:xplan`, {
 		method: 'PUT',
 		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ kind: 'overview_snapshot', content: snapshot })
@@ -117,7 +120,7 @@ export const saveOverviewSnapshot = async (token: string, snapshot: OverviewSnap
 // For surfaces that just need to read/write a keyed JSON document (e.g. leads).
 
 export const getOutput = async <T = unknown>(token: string, key: string): Promise<T | null> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/${key}`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/${key}`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (res.status === 404) return null;
@@ -129,7 +132,7 @@ export const getOutput = async <T = unknown>(token: string, key: string): Promis
 };
 
 export const putOutput = async (token: string, key: string, kind: string, content: unknown): Promise<void> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/${key}`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/${key}`, {
 		method: 'PUT',
 		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ kind, content })
@@ -146,7 +149,7 @@ export const putOutput = async (token: string, key: string, kind: string, conten
 
 /** Load a saved onboarding session, or null if none exists yet. */
 export const getOnboardingSession = async (token: string, sessionId: string): Promise<any | null> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/onboarding:${sessionId}`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/onboarding:${sessionId}`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (res.status === 404) return null;
@@ -159,7 +162,7 @@ export const getOnboardingSession = async (token: string, sessionId: string): Pr
 
 /** Upsert an onboarding session. `session` is the OnboardingSession content. */
 export const saveOnboardingSession = async (token: string, sessionId: string, session: any): Promise<void> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/outputs/onboarding:${sessionId}`, {
+	const res = await fetch(`${gatewayUrl()}/gw/outputs/onboarding:${sessionId}`, {
 		method: 'PUT',
 		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ kind: 'onboarding_session', content: session })
@@ -174,7 +177,7 @@ export const saveOnboardingSession = async (token: string, sessionId: string, se
 // locked === true  → hermes cannot open/read/write XPLAN.
 
 export const getGuardrail = async (token: string): Promise<boolean> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/guardrail`, {
+	const res = await fetch(`${gatewayUrl()}/gw/guardrail`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
@@ -182,7 +185,7 @@ export const getGuardrail = async (token: string): Promise<boolean> => {
 };
 
 export const setGuardrail = async (token: string, locked: boolean): Promise<boolean> => {
-	const res = await fetch(`${GATEWAY_URL}/gw/guardrail`, {
+	const res = await fetch(`${gatewayUrl()}/gw/guardrail`, {
 		method: 'PUT',
 		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 		body: JSON.stringify({ locked })
