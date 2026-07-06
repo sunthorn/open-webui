@@ -103,7 +103,8 @@
 	};
 
 	$: q = query.trim().toLowerCase();
-	$: bookFiltered = q ? book.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 50) : [];
+	// Show the synced book: filtered when searching, otherwise browse the first 50.
+	$: bookFiltered = (q ? book.filter((c) => c.name.toLowerCase().includes(q)) : book).slice(0, 50);
 	$: recentFiltered = $recentClients.filter((c) => !q || c.name.toLowerCase().includes(q));
 	$: attentionFiltered = attention.filter((n) => !q || n.toLowerCase().includes(q));
 	$: openLeads = leads.filter((l) => l.stage === 'enquiry');
@@ -163,11 +164,13 @@
 		</button>
 	{/if}
 
-	<!-- Client book results (local) -->
-	{#if q && bookFiltered.length}
+	<!-- Client book results (local): filtered when searching, else browse -->
+	{#if bookFiltered.length}
 		<section class="mb-6">
-			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Clients · {bookFiltered.length}{bookFiltered.length === 50 ? '+' : ''}</h2>
-			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
+			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+				{q ? 'Clients' : 'Your clients'} · {q ? bookFiltered.length : `${bookFiltered.length}${book.length > 50 ? ` of ${book.length}` : ''}`}
+			</h2>
+			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden max-h-96 overflow-y-auto">
 				{#each bookFiltered as c}
 					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
 						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">{c.name.slice(0, 1).toUpperCase()}</span>
