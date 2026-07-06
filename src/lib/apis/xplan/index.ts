@@ -159,31 +159,45 @@ export const searchXplanClients = async (
 // search form to operate, unlike the flaky live search) and extract the table.
 // Single page for now (~100 rows); pagination added once extraction is proven.
 
-const CLIENT_BOOK_PROMPT = [
-	'You are connected to a browser already logged in to XPLAN (IRESS) for a',
-	'financial planner.',
-	'',
-	'Do EXACTLY this: call browser_navigate ONCE to',
-	'https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client',
-	'then read the CLIENT RESULTS TABLE on that page.',
-	'',
-	'Return STRICT JSON ONLY (no prose, no code fences): an array of the client',
-	'rows visible on this page, each {"name":"<display name>","id":"<entity id',
-	'from the row link href if present, else empty>"}. Include every row (up to ~100).',
-	'',
-	'If you are not logged in, reply exactly: NOT_LOGGED_IN',
-	'Do NOT paginate, do NOT open client pages, do NOT use browser_cdp /',
-	'execute_code / browser_snapshot. Do not loop.'
-].join('\n');
+export interface ClientPage {
+	total: number; // total clients reported by XPLAN ("… of 1817"), 0 if unknown
+	rows: XplanClient[];
+}
+
+// Compact "name|id" lines beat JSON here: the model transcribes far more rows
+// before it stops, so we get the full ~100/page instead of truncating at ~40.
+const clientPagePrompt = (page: number): string =>
+	[
+		'You are connected to a browser already logged in to XPLAN (IRESS) for a',
+		'financial planner.',
+		'',
+		'Go to the client results list:',
+		'https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client',
+		page > 1
+			? `Then use the results pager (the page-number / Next links at the bottom of the table) to go to results page ${page}.`
+			: '',
+		'Read EVERY client row in the results table on the CURRENT page — do not stop early.',
+		'',
+		'Output format — STRICT, no prose, no JSON, no code fences:',
+		'- FIRST line: TOTAL=<the total client count shown, e.g. from "1 to 100 of 1817">, else TOTAL=0',
+		'- THEN one line per client: name|id   (id = entity id from the row link href, or empty)',
+		'Output nothing else.',
+		'',
+		'If you are not logged in, output exactly: NOT_LOGGED_IN',
+		'Do not open client pages. Do not use browser_cdp / execute_code / browser_snapshot.'
+	]
+		.filter(Boolean)
+		.join('\n');
 
 /**
- * Sync one page of the XPLAN client book via hermes.
- * @returns client rows (possibly empty), or the sentinel 'NOT_LOGGED_IN'.
+ * Sync ONE page of the XPLAN client book via hermes.
+ * @returns { total, rows }, or the sentinel 'NOT_LOGGED_IN'.
  */
 export const gatherXplanClientPage = async (
 	token: string,
+	page = 1,
 	timeoutMs = 120_000
-): Promise<XplanClient[] | 'NOT_LOGGED_IN'> => {
+): Promise<ClientPage | 'NOT_LOGGED_IN'> => {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
@@ -192,7 +206,7 @@ export const gatherXplanClientPage = async (
 			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				model: 'hermes-agent',
-				messages: [{ role: 'user', content: CLIENT_BOOK_PROMPT }],
+				messages: [{ role: 'user', content: clientPagePrompt(page) }],
 				stream: false
 			}),
 			signal: controller.signal
@@ -204,18 +218,20 @@ export const gatherXplanClientPage = async (
 		const data = await res.json();
 		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
 		if (raw.includes('NOT_LOGGED_IN')) return 'NOT_LOGGED_IN';
-		const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(jsonText);
-		} catch {
-			throw new Error('XPLAN returned an unexpected format while syncing clients. Try again.');
+		const text = raw.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```$/i, '');
+		let total = 0;
+		const rows: XplanClient[] = [];
+		for (const line of text.split('\n').map((l) => l.trim()).filter(Boolean)) {
+			const m = line.match(/^TOTAL\s*=\s*(\d+)/i);
+			if (m) {
+				total = parseInt(m[1], 10) || 0;
+				continue;
+			}
+			const [namePart, idPart = ''] = line.split('|');
+			const name = namePart.trim();
+			if (name && !/^total\s*=/i.test(name)) rows.push({ name, id: idPart.trim() });
 		}
-		if (!Array.isArray(parsed)) return [];
-		return parsed
-			.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
-			.map((c) => ({ name: String(c.name ?? '').trim(), id: String(c.id ?? '') }))
-			.filter((c) => c.name.length > 0);
+		return { total, rows };
 	} catch (e: any) {
 		if (e?.name === 'AbortError') throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s syncing clients.`);
 		throw e;

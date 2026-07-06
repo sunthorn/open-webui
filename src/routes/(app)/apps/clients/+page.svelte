@@ -20,6 +20,7 @@
 	let bookSyncedAt = '';
 	let syncing = false;
 	let syncErr = '';
+	let syncProgress = '';
 
 	const token = () => localStorage.getItem('token') ?? '';
 	const nowIso = () => new Date().toISOString();
@@ -58,24 +59,46 @@
 		}
 	});
 
-	// Manual sync — pulls a page of the XPLAN client book into axi (token-spending).
+	// Manual sync — sweeps the XPLAN client book page by page into axi
+	// (token-spending). Accumulates + dedupes, saves after each page (so a
+	// stop/crash keeps progress), and halts when the total is reached, a page is
+	// empty, or the pager stops advancing (no new rows).
+	const MAX_PAGES = 30;
 	const syncBook = async () => {
 		if (syncing) return;
 		syncing = true;
 		syncErr = '';
+		syncProgress = 'Starting…';
+		const map = new Map<string, XplanClient>();
+		let total = 0;
 		try {
-			const res = await gatherXplanClientPage(token());
-			if (res === 'NOT_LOGGED_IN') {
-				syncErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then sync.';
-			} else {
-				book = res;
+			for (let page = 1; page <= MAX_PAGES; page++) {
+				syncProgress = `Reading page ${page}${total ? ` · ${map.size} of ${total}` : ` · ${map.size} so far`}…`;
+				const res = await gatherXplanClientPage(token(), page);
+				if (res === 'NOT_LOGGED_IN') {
+					if (map.size === 0) syncErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then sync.';
+					break;
+				}
+				if (res.total) total = res.total;
+				const before = map.size;
+				for (const c of res.rows) {
+					const k = c.id || c.name.toLowerCase();
+					if (!map.has(k)) map.set(k, c);
+				}
+				const added = map.size - before;
+				// Persist progress after each page.
+				book = Array.from(map.values());
 				bookSyncedAt = nowIso();
 				await putOutput(token(), 'clients', 'client_book', { clients: book, syncedAt: bookSyncedAt });
+				if (res.rows.length === 0) break; // empty page → done
+				if (total && map.size >= total) break; // got them all
+				if (added === 0) break; // pager not advancing → stop (avoids dupes/looping)
 			}
 		} catch (e: any) {
 			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
 		} finally {
 			syncing = false;
+			syncProgress = '';
 		}
 	};
 
@@ -132,7 +155,9 @@
 
 	<!-- Sync status -->
 	<p class="text-xs text-gray-400 mb-4">
-		{#if syncErr}
+		{#if syncing && syncProgress}
+			<span>{syncProgress}</span>
+		{:else if syncErr}
 			<span class="text-red-500">{syncErr}</span>
 		{:else if book.length}
 			{book.length} clients synced{bookSyncedAt ? ` · ${fmt(bookSyncedAt)}` : ''}. Searching your local copy.
@@ -162,28 +187,6 @@
 			<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none shrink-0">+</span>
 			<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
 		</button>
-	{/if}
-
-	<!-- Client book results (local): filtered when searching, else browse -->
-	{#if bookFiltered.length}
-		<section class="mb-6">
-			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-				{q ? 'Clients' : 'Your clients'} · {q ? bookFiltered.length : `${bookFiltered.length}${book.length > 50 ? ` of ${book.length}` : ''}`}
-			</h2>
-			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden max-h-96 overflow-y-auto">
-				{#each bookFiltered as c}
-					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
-						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">{c.name.slice(0, 1).toUpperCase()}</span>
-						<span class="flex-1 min-w-0 truncate">{c.name}</span>
-						{#if c.id}<span class="text-[10px] text-gray-400 tabular-nums">id {c.id}</span>{/if}
-					</button>
-				{/each}
-			</div>
-		</section>
-	{:else if q && book.length && !bookFiltered.length}
-		<div class="mb-6 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-4 text-center text-sm text-gray-500">
-			No synced client matched “{query.trim()}”. Create a new client above, or re-sync the book.
-		</div>
 	{/if}
 
 	<!-- Recent -->
@@ -236,4 +239,26 @@
 			</div>
 		{/if}
 	</section>
+
+	<!-- Your clients (synced book): browse at the bottom; filters when searching -->
+	{#if bookFiltered.length}
+		<section class="mt-6">
+			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+				{q ? 'Clients' : 'Your clients'} · {q ? bookFiltered.length : `${bookFiltered.length}${book.length > 50 ? ` of ${book.length}` : ''}`}
+			</h2>
+			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden max-h-96 overflow-y-auto">
+				{#each bookFiltered as c}
+					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
+						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">{c.name.slice(0, 1).toUpperCase()}</span>
+						<span class="flex-1 min-w-0 truncate">{c.name}</span>
+						{#if c.id}<span class="text-[10px] text-gray-400 tabular-nums">id {c.id}</span>{/if}
+					</button>
+				{/each}
+			</div>
+		</section>
+	{:else if q && book.length}
+		<div class="mt-6 rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-4 text-center text-sm text-gray-500">
+			No synced client matched “{query.trim()}”. Create a new client above, or re-sync the book.
+		</div>
+	{/if}
 </div>
