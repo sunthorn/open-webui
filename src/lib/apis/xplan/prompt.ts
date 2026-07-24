@@ -8,6 +8,10 @@ export const safe = (s: string): string => s.replace(/["'`\r\n]/g, ' ').trim();
 const sanitize = (params: Params): Params =>
 	Object.fromEntries(Object.entries(params).map(([k, v]) => [k, safe(v)]));
 
+/** Replace `{key}` tokens with `params[key]`; tokens with no matching param are left as-is. */
+const interpolate = (s: string, p: Params): string =>
+	s.replace(/\{(\w+)\}/g, (m, key) => (key in p ? p[key] : m));
+
 export const buildPrompt = (op: XplanOperation, params: Params = {}): string => {
 	const p = sanitize(params);
 	const url = typeof op.url === 'function' ? op.url(p) : op.url;
@@ -17,16 +21,16 @@ export const buildPrompt = (op: XplanOperation, params: Params = {}): string => 
 		'',
 		'Do EXACTLY this and nothing more: call browser_navigate once to',
 		url,
-		...(op.navHints ?? []).map((h) => `Then: ${h}`),
+		...(op.navHints ?? []).map((h) => `Then: ${interpolate(h, p)}`),
 		...(op.maxScrolls
 			? [`You may scroll the page at most ${op.maxScrolls} time(s) to reveal the full table.`]
 			: []),
 		'',
 		'Then read:',
-		...op.extract.map((e) => `- ${e}`),
+		...op.extract.map((e) => `- ${interpolate(e, p)}`),
 		'',
 		'Output format — STRICT, no prose, no code fences:',
-		op.outputSpec,
+		interpolate(op.outputSpec, p),
 		'Output nothing else.',
 		'',
 		'If you are not logged in, output exactly: NOT_LOGGED_IN',

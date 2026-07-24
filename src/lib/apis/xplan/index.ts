@@ -1,6 +1,10 @@
 import { WEBUI_BASE_URL } from '$lib/constants';
 import type { Params, XplanOperation } from './playbook';
 import { buildPrompt } from './prompt';
+import { PLAYBOOK } from './playbook';
+import type { XplanClient, ClientPage, RawBriefingItem } from './playbook';
+
+export { type XplanClient, type ClientPage, type RawBriefingItem } from './playbook';
 
 /** Thrown when XPLAN reports the browser session is not logged in. */
 export class XplanNotLoggedInError extends Error {
@@ -73,24 +77,6 @@ export interface PlannerOverview {
 	todos: PlannerTodo[];
 }
 
-// Constrained prompt: a single navigate + short text summary. Verified to run
-// in ~15s and stay stable. Deliberately forbids snapshot/cdp/execute_code and
-// looping — those make the agent thrash on XPLAN's heavy dashboard and can OOM
-// the backend.
-const XPLAN_SUMMARY_PROMPT = [
-	'You are connected to a browser already logged in to XPLAN (IRESS financial',
-	'planning software) for a financial planner.',
-	'',
-	'Do EXACTLY this and nothing more: call browser_navigate once to',
-	'https://sparkfg.xplan.iress.com.au/dashboard/mainhtml , then give a SHORT',
-	'plain-text summary (max 6 bullet lines, start each line with "- ") of what',
-	'the planner has on their dashboard — e.g. recent clients and any diary /',
-	'appointment / outstanding-task items.',
-	'',
-	'Do NOT use browser_cdp, execute_code, or browser_snapshot. Do not loop.',
-	'Keep it brief. If you are not logged in, reply exactly: NOT_LOGGED_IN'
-].join('\n');
-
 /**
  * Ask hermes to read the planner's live XPLAN dashboard and return a short
  * summary. Routes through Open WebUI's own /api/chat/completions proxy, so the
@@ -100,71 +86,17 @@ const XPLAN_SUMMARY_PROMPT = [
  * @throws on transport / backend error
  */
 export const syncXplanOverview = async (token: string, timeoutMs = 90_000): Promise<string> => {
-	// Hit OWUI's LIGHT direct proxy (/openai/chat/completions) rather than the
-	// heavy /api/chat/completions pipeline (which also fires title/tag/follow-up
-	// model calls against the slow agent — multiplying latency). Add a hard
-	// timeout so a stalled backend fails fast instead of spinning forever.
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
-		const res = await fetch(`${WEBUI_BASE_URL}/openai/chat/completions`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				model: 'hermes-agent',
-				messages: [{ role: 'user', content: XPLAN_SUMMARY_PROMPT }],
-				stream: false
-			}),
-			signal: controller.signal
-		});
-		if (!res.ok) {
-			const detail = await res.json().catch(() => ({}));
-			throw new Error(detail?.detail ?? detail?.error ?? `HTTP ${res.status}`);
-		}
-		const data = await res.json();
-		return (data?.choices?.[0]?.message?.content ?? '').trim();
-	} catch (e: any) {
-		if (e?.name === 'AbortError') {
-			throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s — is XPLAN unlocked and reachable?`);
-		}
+		return await runOperation<string>({ ...PLAYBOOK['overview.summary'], timeoutMs }, token);
+	} catch (e) {
+		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;
-	} finally {
-		clearTimeout(timer);
 	}
 };
 
 // --- Live client search ---------------------------------------------------
 // Search the planner's real XPLAN client book (via hermes) and return matches.
 // Token-spending + browser-driven, so it's an explicit action, not per-keystroke.
-
-export interface XplanClient {
-	name: string;
-	id: string; // XPLAN entity id if extractable, else ''
-}
-
-// Strip quotes/backticks/newlines from values interpolated into prompt text so
-// a malicious/odd query can't break out of the surrounding string or inject
-// extra instructions into the prompt template.
-const safe = (s: string): string => s.replace(/["'`\r\n]/g, ' ').trim();
-
-const clientSearchPrompt = (query: string): string => {
-	const q = safe(query);
-	return [
-		'You are connected to a browser already logged in to XPLAN (IRESS financial',
-		'planning software) for a financial planner.',
-		'',
-		`Find clients whose name matches "${q}".`,
-		'Use the client search (the Clients search under factfind — e.g.',
-		'https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client ),',
-		`enter "${q}" as the name/keyword, run the search, and read the results.`,
-		'',
-		'Return STRICT JSON ONLY (no prose, no code fences): an array of up to 25',
-		'matches, each {"name":"<display name>","id":"<entity id from the row link, or empty>"}.',
-		`Only include clients whose name actually matches "${q}". If none, return: []`,
-		'If you are not logged in, reply exactly: NOT_LOGGED_IN',
-		'Do not open individual client pages. Keep it to a single search; do not loop.'
-	].join('\n');
-};
 
 /**
  * Search XPLAN clients by name via hermes.
@@ -175,80 +107,17 @@ export const searchXplanClients = async (
 	query: string,
 	timeoutMs = 120_000
 ): Promise<XplanClient[] | 'NOT_LOGGED_IN'> => {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
-		const res = await fetch(`${WEBUI_BASE_URL}/openai/chat/completions`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				model: 'hermes-agent',
-				messages: [{ role: 'user', content: clientSearchPrompt(query) }],
-				stream: false
-			}),
-			signal: controller.signal
-		});
-		if (!res.ok) {
-			const detail = await res.json().catch(() => ({}));
-			throw new Error(detail?.detail ?? detail?.error ?? `HTTP ${res.status}`);
-		}
-		const data = await res.json();
-		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
-		if (raw.includes('NOT_LOGGED_IN')) return 'NOT_LOGGED_IN';
-		const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(jsonText);
-		} catch {
-			throw new Error('XPLAN returned an unexpected format while searching. Try again.');
-		}
-		if (!Array.isArray(parsed)) return [];
-		return parsed
-			.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
-			.map((c) => ({ name: String(c.name ?? '').trim(), id: String(c.id ?? '') }))
-			.filter((c) => c.name.length > 0);
-	} catch (e: any) {
-		if (e?.name === 'AbortError') throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s searching XPLAN.`);
+		return await runOperation<XplanClient[]>({ ...PLAYBOOK['clients.search'], timeoutMs }, token, { query });
+	} catch (e) {
+		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;
-	} finally {
-		clearTimeout(timer);
 	}
 };
 
 // --- Client book sync -----------------------------------------------------
 // Navigate the deterministic client-results URL (which RENDERS the list — no
 // search form to operate, unlike the flaky live search) and extract the table.
-// Single page for now (~100 rows); pagination added once extraction is proven.
-
-export interface ClientPage {
-	total: number; // total clients reported by XPLAN ("… of 1817"), 0 if unknown
-	rows: XplanClient[];
-}
-
-// Compact "name|id" lines beat JSON here: the model transcribes far more rows
-// before it stops, so we get the full ~100/page instead of truncating at ~40.
-const clientPagePrompt = (page: number): string =>
-	[
-		'You are connected to a browser already logged in to XPLAN (IRESS) for a',
-		'financial planner.',
-		'',
-		'Go to the client results list:',
-		'https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client',
-		page > 1
-			? `Then use the results pager (the page-number / Next links at the bottom of the table) to go to results page ${page}.`
-			: '',
-		'Read EVERY client row in the results table on the CURRENT page — do not stop early.',
-		'',
-		'Output format — STRICT, no prose, no JSON, no code fences:',
-		'- FIRST line: TOTAL=<the total client count shown, e.g. from "1 to 100 of 1817">, else TOTAL=0',
-		'- THEN one line per client: name|id   (id = entity id from the row link href, or empty)',
-		'Output nothing else.',
-		'',
-		'If you are not logged in, output exactly: NOT_LOGGED_IN',
-		'Do not open client pages. Do not use browser_cdp / execute_code / browser_snapshot.'
-	]
-		.filter(Boolean)
-		.join('\n');
 
 /**
  * Sync ONE page of the XPLAN client book via hermes.
@@ -259,45 +128,13 @@ export const gatherXplanClientPage = async (
 	page = 1,
 	timeoutMs = 120_000
 ): Promise<ClientPage | 'NOT_LOGGED_IN'> => {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
-		const res = await fetch(`${WEBUI_BASE_URL}/openai/chat/completions`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				model: 'hermes-agent',
-				messages: [{ role: 'user', content: clientPagePrompt(page) }],
-				stream: false
-			}),
-			signal: controller.signal
+		return await runOperation<ClientPage>({ ...PLAYBOOK['clients.bookPage'], timeoutMs }, token, {
+			page: String(page)
 		});
-		if (!res.ok) {
-			const detail = await res.json().catch(() => ({}));
-			throw new Error(detail?.detail ?? detail?.error ?? `HTTP ${res.status}`);
-		}
-		const data = await res.json();
-		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
-		if (raw.includes('NOT_LOGGED_IN')) return 'NOT_LOGGED_IN';
-		const text = raw.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```$/i, '');
-		let total = 0;
-		const rows: XplanClient[] = [];
-		for (const line of text.split('\n').map((l) => l.trim()).filter(Boolean)) {
-			const m = line.match(/^TOTAL\s*=\s*(\d+)/i);
-			if (m) {
-				total = parseInt(m[1], 10) || 0;
-				continue;
-			}
-			const [namePart, idPart = ''] = line.split('|');
-			const name = namePart.trim();
-			if (name && !/^total\s*=/i.test(name)) rows.push({ name, id: idPart.trim() });
-		}
-		return { total, rows };
-	} catch (e: any) {
-		if (e?.name === 'AbortError') throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s syncing clients.`);
+	} catch (e) {
+		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;
-	} finally {
-		clearTimeout(timer);
 	}
 };
 
@@ -307,33 +144,6 @@ export const gatherXplanClientPage = async (
 // replaces the sample data with a live, planner-triggered read.
 
 import type { DailyBriefing, BriefingItem } from '$lib/apis/gateway';
-
-export interface RawBriefingItem {
-	title: string;
-	client?: string;
-	detail?: string;
-	dueAt?: string; // ISO 'YYYY-MM-DD' or ''
-	time?: string; // 'HH:MM' or ''
-	done?: boolean;
-}
-
-const XPLAN_BRIEFING_PROMPT = [
-	'You are connected to a browser already logged in to XPLAN (IRESS financial',
-	'planning software) for a financial planner.',
-	'',
-	'Do EXACTLY this and nothing more: call browser_navigate once to',
-	'https://sparkfg.xplan.iress.com.au/dashboard/mainhtml , then read the',
-	"planner's TASKS, DIARY / APPOINTMENTS and REVIEWS that are visible on the",
-	'page.',
-	'',
-	'Return STRICT JSON ONLY (no prose, no code fences): an array of items, each:',
-	'{"title":"...","client":"name or empty","dueAt":"YYYY-MM-DD or empty",',
-	'"time":"HH:MM or empty","done":false,"detail":""}',
-	'',
-	'Include only items actually visible. If none are visible, return exactly: []',
-	'If you are not logged in, reply exactly: NOT_LOGGED_IN',
-	'Do NOT use browser_cdp, execute_code, or browser_snapshot. Do not loop.'
-].join('\n');
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 const parseDue = (s?: string): Date | null => {
@@ -405,53 +215,14 @@ export const computeBriefing = (raw: RawBriefingItem[], today = new Date()): Dai
  * Read today's tasks/diary live from XPLAN via hermes and return raw items.
  * @returns raw items (possibly empty), or throws; special value 'NOT_LOGGED_IN'.
  */
-export const gatherXplanBriefing = async (token: string, timeoutMs = 120_000): Promise<RawBriefingItem[] | 'NOT_LOGGED_IN'> => {
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), timeoutMs);
+export const gatherXplanBriefing = async (
+	token: string,
+	timeoutMs = 120_000
+): Promise<RawBriefingItem[] | 'NOT_LOGGED_IN'> => {
 	try {
-		const res = await fetch(`${WEBUI_BASE_URL}/openai/chat/completions`, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				model: 'hermes-agent',
-				messages: [{ role: 'user', content: XPLAN_BRIEFING_PROMPT }],
-				stream: false
-			}),
-			signal: controller.signal
-		});
-		if (!res.ok) {
-			const detail = await res.json().catch(() => ({}));
-			throw new Error(detail?.detail ?? detail?.error ?? `HTTP ${res.status}`);
-		}
-		const data = await res.json();
-		const rawText = (data?.choices?.[0]?.message?.content ?? '').trim();
-		if (rawText.includes('NOT_LOGGED_IN')) return 'NOT_LOGGED_IN';
-		const jsonText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(jsonText);
-		} catch {
-			throw new Error('XPLAN returned an unexpected format while reading tasks. Try again.');
-		}
-		if (!Array.isArray(parsed)) return [];
-		// Coerce/validate each field (like searchXplanClients / proposeMapping) so
-		// malformed model output can't leak `[object Object]` / `Invalid Date`
-		// into computeBriefing. Drop non-objects and items without a title.
-		return parsed
-			.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-			.map((x) => ({
-				title: String(x.title ?? ''),
-				client: x.client ? String(x.client) : undefined,
-				detail: x.detail ? String(x.detail) : undefined,
-				dueAt: x.dueAt ? String(x.dueAt) : undefined,
-				time: x.time ? String(x.time) : undefined,
-				done: !!x.done
-			}))
-			.filter((x) => x.title.trim().length > 0);
-	} catch (e: any) {
-		if (e?.name === 'AbortError') throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s reading XPLAN tasks.`);
+		return await runOperation<RawBriefingItem[]>({ ...PLAYBOOK['briefing.gather'], timeoutMs }, token);
+	} catch (e) {
+		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;
-	} finally {
-		clearTimeout(timer);
 	}
 };

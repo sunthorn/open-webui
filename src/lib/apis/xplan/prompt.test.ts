@@ -51,3 +51,25 @@ describe('buildPrompt', () => {
 		expect(p).not.toMatch(/entity_id=1"/);
 	});
 });
+
+describe('buildPrompt {key} interpolation', () => {
+	it('replaces {query}/{page} tokens in navHints, extract and outputSpec', () => {
+		const pagedOp: XplanOperation = {
+			id: 'test.paged',
+			title: 'Test paged op',
+			reconDoc: 'docs/xplan-playbook/02-client-search.md',
+			url: `https://sparkfg.xplan.iress.com.au/list`,
+			navHints: ['if {page} is greater than 1, go to results page {page}'],
+			extract: ['every row matching "{query}"'],
+			outputFormat: 'text',
+			outputSpec: 'rows for "{query}" only',
+			parse: (raw) => raw
+		};
+		const prompt = buildPrompt(pagedOp, { query: 'smith', page: '3' });
+		expect(prompt).toContain('go to results page 3');
+		expect(prompt).toContain('every row matching "smith"');
+		expect(prompt).toContain('rows for "smith" only');
+		expect(prompt).not.toContain('{page}');
+		expect(prompt).not.toContain('{query}');
+	});
+});
