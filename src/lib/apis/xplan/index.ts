@@ -1,4 +1,58 @@
 import { WEBUI_BASE_URL } from '$lib/constants';
+import type { Params, XplanOperation } from './playbook';
+import { buildPrompt } from './prompt';
+
+/** Thrown when XPLAN reports the browser session is not logged in. */
+export class XplanNotLoggedInError extends Error {
+	constructor() {
+		super('NOT_LOGGED_IN');
+		this.name = 'XplanNotLoggedInError';
+	}
+}
+
+/**
+ * Run one catalog operation via hermes. THE single transport for all XPLAN
+ * reads: prompt from the catalog, OWUI light proxy, timeout, sentinel check,
+ * fence-strip, strict parse.
+ */
+export const runOperation = async <T = unknown>(
+	op: XplanOperation,
+	token: string,
+	params: Params = {},
+	fetchFn: typeof fetch = fetch
+): Promise<T> => {
+	const timeoutMs = op.timeoutMs ?? 120_000;
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const res = await fetchFn(`${WEBUI_BASE_URL}/openai/chat/completions`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				model: 'hermes-agent',
+				messages: [{ role: 'user', content: buildPrompt(op, params) }],
+				stream: false
+			}),
+			signal: controller.signal
+		});
+		if (!res.ok) {
+			const detail = await res.json().catch(() => ({}));
+			throw new Error((detail as any)?.detail ?? (detail as any)?.error ?? `HTTP ${res.status}`);
+		}
+		const data = await res.json();
+		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
+		if (raw.includes('NOT_LOGGED_IN')) throw new XplanNotLoggedInError();
+		const stripped = raw.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```$/i, '').trim();
+		return op.parse(stripped) as T;
+	} catch (e: any) {
+		if (e?.name === 'AbortError') {
+			throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s — is XPLAN unlocked and reachable?`);
+		}
+		throw e;
+	} finally {
+		clearTimeout(timer);
+	}
+};
 
 // xplan-agent · Overview/Today data access (Slice 1, Stage B).
 //
