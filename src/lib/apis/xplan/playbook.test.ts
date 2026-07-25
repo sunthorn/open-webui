@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { PLAYBOOK, parseClientList, parseBookPage, parseBriefingItems } from './playbook';
+import {
+	PLAYBOOK,
+	parseClientList,
+	parseBookPage,
+	parseBriefingItems,
+	parseClientContact,
+	parsePipeTable,
+	parseClientTasks
+} from './playbook';
 
 // clients.search now reads XPLAN's internal /resourceful/entity JSON resource
 // (recon: docs/xplan-playbook/02-client-search.md) — rows look like
@@ -106,5 +114,118 @@ describe('PLAYBOOK migrated entries', () => {
 		const op = PLAYBOOK['briefing.gather'];
 		expect(op.outputSpec).toMatch(/DD\/MM\/YYYY/);
 		expect(op.outputSpec).toMatch(/YYYY-MM-DD/);
+	});
+});
+
+// client.* deep-sync operations (Task 9) — recon: docs/xplan-playbook/03-07.
+// Fixtures below use fabricated names/ids only — never real client data.
+describe('parseClientContact (client.contact)', () => {
+	it('coerces a contact object and keeps only string fields', () => {
+		const raw = JSON.stringify({
+			name: 'Testperson, Alex',
+			preferredName: 'Alex',
+			dob: '1980-01-02',
+			address: '1 Example St, Testville',
+			phones: ['0400 000 000'],
+			emails: ['alex@example.invalid'],
+			employment: 'Engineer',
+			partner: 'Testperson, Sam'
+		});
+		const out = parseClientContact(raw);
+		expect(out.name).toBe('Testperson, Alex');
+		expect(out.emails).toEqual(['alex@example.invalid']);
+	});
+	it('throws on non-JSON', () => {
+		expect(() => parseClientContact('cannot find the page')).toThrow(/unexpected format/i);
+	});
+});
+
+describe('parsePipeTable (financials / insurance / notes)', () => {
+	it('splits rows into trimmed cells', () => {
+		const raw = 'Super Fund A|Balanced|123456.78\nInsurer B|Life|500000';
+		expect(parsePipeTable(raw)).toEqual([
+			['Super Fund A', 'Balanced', '123456.78'],
+			['Insurer B', 'Life', '500000']
+		]);
+	});
+	it('drops empty lines and a NONE sentinel', () => {
+		expect(parsePipeTable('NONE')).toEqual([]);
+		expect(parsePipeTable('\n\n')).toEqual([]);
+	});
+});
+
+describe('parseClientTasks (client.tasks)', () => {
+	it('reuses briefing-item coercion', () => {
+		const raw = JSON.stringify([{ title: 'Annual review', dueAt: '2026-08-01' }]);
+		expect(parseClientTasks(raw)).toHaveLength(1);
+	});
+});
+
+describe('PLAYBOOK client.* entries', () => {
+	it('exist, are entity-id parameterized, and cite recon docs', () => {
+		for (const id of [
+			'client.contact',
+			'client.financials',
+			'client.insurance',
+			'client.tasks',
+			'client.notes'
+		]) {
+			const op = PLAYBOOK[id];
+			expect(op, id).toBeDefined();
+			expect(typeof op.url).toBe('function');
+			expect((op.url as (p: Record<string, string>) => string)({ clientId: '111111' })).toContain(
+				'111111'
+			);
+			expect(op.reconDoc).toMatch(/^docs\/xplan-playbook\/0[3-7]/);
+		}
+	});
+
+	it('client.contact reads the client_contact factfind page (recon 03)', () => {
+		const op = PLAYBOOK['client.contact'];
+		const url = (op.url as (p: Record<string, string>) => string)({ clientId: '999999' });
+		expect(url).toBe(
+			'https://sparkfg.xplan.iress.com.au/factfind/view/999999?role=client&page=client_contact'
+		);
+		expect(op.outputFormat).toBe('json');
+	});
+
+	it('client.financials reads the balancesheet factfind page (recon 04)', () => {
+		const op = PLAYBOOK['client.financials'];
+		const url = (op.url as (p: Record<string, string>) => string)({ clientId: '999999' });
+		expect(url).toBe(
+			'https://sparkfg.xplan.iress.com.au/factfind/view/999999?role=client&page=balancesheet'
+		);
+		expect(op.outputFormat).toBe('lines');
+		expect(op.outputSpec).toMatch(/NONE/);
+	});
+
+	it('client.insurance reads a tenant-specific custom page and flags it as such (recon 05)', () => {
+		const op = PLAYBOOK['client.insurance'];
+		const url = (op.url as (p: Record<string, string>) => string)({ clientId: '999999' });
+		expect(url).toBe(
+			'https://sparkfg.xplan.iress.com.au/factfind/view/999999?role=client&page=custom_page_185'
+		);
+		expect(op.outputFormat).toBe('lines');
+		expect(op.outputSpec).toMatch(/NONE/);
+		expect(op.extract.join(' ')).toMatch(/tenant|practice|custom/i);
+	});
+
+	it('client.tasks reads the cloud_app kanban SPA with a longer timeout (recon 06)', () => {
+		const op = PLAYBOOK['client.tasks'];
+		const url = (op.url as (p: Record<string, string>) => string)({ clientId: '999999' });
+		expect(url).toBe('https://sparkfg.xplan.iress.com.au/cloud_app/tasks/999999/kanban');
+		expect(op.outputFormat).toBe('json');
+		expect(op.timeoutMs).toBe(120_000);
+		expect((op.navHints ?? []).join(' ')).toMatch(/client-side|SPA/i);
+	});
+
+	it('client.notes reads the note factfind page and snippets untrusted note bodies (recon 07)', () => {
+		const op = PLAYBOOK['client.notes'];
+		const url = (op.url as (p: Record<string, string>) => string)({ clientId: '999999' });
+		expect(url).toBe('https://sparkfg.xplan.iress.com.au/factfind/view/999999?role=client&page=note');
+		expect(op.outputFormat).toBe('lines');
+		expect(op.outputSpec).toMatch(/NONE/);
+		expect(op.outputSpec).toMatch(/subject/i);
+		expect((op.extract.join(' ') + op.outputSpec).toLowerCase()).toMatch(/untrusted/);
 	});
 });
