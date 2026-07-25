@@ -128,12 +128,26 @@ describe('parseClientContact (client.contact)', () => {
 			address: '1 Example St, Testville',
 			phones: ['0400 000 000'],
 			emails: ['alex@example.invalid'],
-			employment: 'Engineer',
 			partner: 'Testperson, Sam'
 		});
 		const out = parseClientContact(raw);
 		expect(out.name).toBe('Testperson, Alex');
 		expect(out.emails).toEqual(['alex@example.invalid']);
+	});
+	it('coerces partner contact fields when present (couples)', () => {
+		const raw = JSON.stringify({
+			name: 'Testperson, Alex',
+			phones: [],
+			emails: [],
+			partner: 'Testperson, Sam',
+			partnerPhones: ['0400 111 111'],
+			partnerEmails: ['sam@example.invalid'],
+			partnerAddress: '1 Example St, Testville'
+		});
+		const out = parseClientContact(raw);
+		expect(out.partnerPhones).toEqual(['0400 111 111']);
+		expect(out.partnerEmails).toEqual(['sam@example.invalid']);
+		expect(out.partnerAddress).toBe('1 Example St, Testville');
 	});
 	it('throws on non-JSON', () => {
 		expect(() => parseClientContact('cannot find the page')).toThrow(/unexpected format/i);
@@ -168,7 +182,8 @@ describe('PLAYBOOK client.* entries', () => {
 			'client.financials',
 			'client.insurance',
 			'client.tasks',
-			'client.notes'
+			'client.notes',
+			'client.super'
 		]) {
 			const op = PLAYBOOK[id];
 			expect(op, id).toBeDefined();
@@ -227,5 +242,18 @@ describe('PLAYBOOK client.* entries', () => {
 		expect(op.outputSpec).toMatch(/NONE/);
 		expect(op.outputSpec).toMatch(/subject/i);
 		expect((op.extract.join(' ') + op.outputSpec).toLowerCase()).toMatch(/untrusted/);
+	});
+
+	it('client.notes outputSpec tells the agent to replace pipe characters in the snippet', () => {
+		const op = PLAYBOOK['client.notes'];
+		expect(op.outputSpec).toMatch(/replace any "\|"/i);
+	});
+
+	it('client.super reads the super factfind page (recon 04)', () => {
+		const op = PLAYBOOK['client.super'];
+		const url = (op.url as (p: Record<string, string>) => string)({ clientId: '999999' });
+		expect(url).toBe('https://sparkfg.xplan.iress.com.au/factfind/view/999999?role=client&page=super');
+		expect(op.outputFormat).toBe('lines');
+		expect(op.outputSpec).toMatch(/NONE/);
 	});
 });

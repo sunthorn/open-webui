@@ -45,7 +45,7 @@ export const runOperation = async <T = unknown>(
 		}
 		const data = await res.json();
 		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
-		if (raw.includes('NOT_LOGGED_IN')) throw new XplanNotLoggedInError();
+		if (raw.split('\n').some((l: string) => l.trim() === 'NOT_LOGGED_IN')) throw new XplanNotLoggedInError();
 		const stripped = raw.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```$/i, '').trim();
 		return op.parse(stripped) as T;
 	} catch (e: any) {

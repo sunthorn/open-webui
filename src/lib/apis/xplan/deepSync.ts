@@ -1,9 +1,9 @@
-// Deep client sync: five sequential catalog reads, merged into one
+// Deep client sync: six sequential catalog reads, merged into one
 // ClientDetail document, saved progressively. Spec §6.
 // Types MIRROR shared-contracts/api-responses.ts (hand-sync convention).
 import { XplanNotLoggedInError } from './index';
 
-export type ClientSectionName = 'contact' | 'financials' | 'insurance' | 'tasks' | 'notes';
+export type ClientSectionName = 'contact' | 'financials' | 'insurance' | 'tasks' | 'notes' | 'super';
 
 export interface ClientSection {
 	status: 'ok' | 'error';
@@ -28,7 +28,8 @@ export const SECTION_OPS = [
 	['financials', 'client.financials'],
 	['insurance', 'client.insurance'],
 	['tasks', 'client.tasks'],
-	['notes', 'client.notes']
+	['notes', 'client.notes'],
+	['super', 'client.super']
 ] as const;
 
 // One deep sync at a time — one Chrome, one agent (spec §7).

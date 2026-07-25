@@ -1,8 +1,9 @@
 <script lang="ts">
 	// Client detail — the planner-facing deep-sync surface (spec §6). Loads a
 	// cached ClientDetail instantly, then lets the planner pull a fresh copy of
-	// five XPLAN sections (contact/financials/insurance/tasks/notes) on demand.
-	// Token-spending: full sync reads 5 pages; per-section Re-sync reads 1.
+	// six XPLAN sections (contact/financials/insurance/tasks/notes/super) on
+	// demand. Token-spending: full sync reads 6 pages; per-section Re-sync
+	// reads 1.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { activeClient } from '$lib/apps/activeClient';
@@ -27,7 +28,8 @@
 		financials: 'Financials',
 		insurance: 'Insurance',
 		tasks: 'Tasks',
-		notes: 'Notes'
+		notes: 'Notes',
+		super: 'Superannuation'
 	};
 
 	// Column headers for the sections whose data is a flat string[][] table
@@ -36,7 +38,8 @@
 	const TABLE_HEADERS: Partial<Record<ClientSectionName, string[]>> = {
 		financials: ['Description', 'Owner', 'Value', 'Type'],
 		insurance: ['Insurer', 'Cover type', 'Sum insured', 'Premium', 'Owner', 'Status'],
-		notes: ['Subject', 'Type', 'Date', 'Snippet']
+		notes: ['Subject', 'Type', 'Date', 'Snippet'],
+		super: ['Fund name', 'Member', 'Balance', 'Type']
 	};
 
 	// `detail` is plain LOCAL component state that this page alone owns — never
@@ -54,9 +57,10 @@
 	// cleared in the `finally` of both fullSync/oneSection — always resolves
 	// within THIS component, whichever handler is running.
 	let syncing: ClientSectionName | null = null;
-	// True ONLY while a full 5-section deep sync (fullSync) is running — gates
-	// the "Syncing N/5" counter badge so a per-section Re-sync (which also sets
-	// `syncing`) never inflates it past its denominator.
+	// True ONLY while a full 6-section deep sync (fullSync) is running — gates
+	// the "Syncing N/6" counter badge (denominator is SECTION_OPS.length, so it
+	// tracks the catalog automatically) so a per-section Re-sync (which also
+	// sets `syncing`) never inflates it past its denominator.
 	let fullSyncActive = false;
 	let progress = 0; // sections completed in the CURRENT full-sync run only
 	let error = '';
@@ -106,7 +110,7 @@
 		},
 		onProgress: (section: ClientSectionName, state: 'start' | 'ok' | 'error') => {
 			if (state === 'start') syncing = section;
-			// Only a full deep sync advances the N/5 counter — a single-section
+			// Only a full deep sync advances the N/6 counter — a single-section
 			// Re-sync must never push it past its denominator.
 			else if (fullSyncActive) progress += 1;
 		}
@@ -264,8 +268,10 @@
 								{#if c.address}<dt class="text-gray-400">Address</dt><dd>{c.address}</dd>{/if}
 								<dt class="text-gray-400">Phones</dt><dd>{c.phones.length ? c.phones.join(', ') : '—'}</dd>
 								<dt class="text-gray-400">Emails</dt><dd>{c.emails.length ? c.emails.join(', ') : '—'}</dd>
-								{#if c.employment}<dt class="text-gray-400">Employment</dt><dd>{c.employment}</dd>{/if}
 								{#if c.partner}<dt class="text-gray-400">Partner</dt><dd>{c.partner}</dd>{/if}
+								{#if c.partnerAddress}<dt class="text-gray-400">Partner address</dt><dd>{c.partnerAddress}</dd>{/if}
+								{#if c.partnerPhones?.length}<dt class="text-gray-400">Partner phones</dt><dd>{c.partnerPhones.join(', ')}</dd>{/if}
+								{#if c.partnerEmails?.length}<dt class="text-gray-400">Partner emails</dt><dd>{c.partnerEmails.join(', ')}</dd>{/if}
 							</dl>
 						{:else if section === 'tasks'}
 							{@const items = (s.data as RawBriefingItem[]) ?? []}

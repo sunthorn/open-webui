@@ -94,10 +94,15 @@ export const parseBriefingItems = (raw: string): RawBriefingItem[] => {
 
 // --- client.* deep-sync operations (Task 9) ---------------------------------
 // One factfind/view?page=<PAGE> read (or a cloud_app SPA read for tasks) per
-// section, keyed to the GROUP/hub entity id (docs/xplan-playbook/03-client-contact.md
-// — couples/groups resolve to a group id that may differ from the individual
-// id returned by clients.search; the deep-sync orchestrator is responsible for
-// passing the hub id as clientId).
+// section, keyed to the entity id the caller passes as clientId.
+// ⚠ KNOWN GAP (docs/xplan-playbook/03-client-contact.md): for couples/groups,
+// the hub keys off the GROUP entity id, which may differ from the INDIVIDUAL
+// id that clients.search/quicksearch returns (recon example: searching Lucia
+// 725767 landed on hub 715828). Resolving the searched id to the correct hub
+// id before deep sync is NOT implemented anywhere in this codebase today —
+// there is no orchestrator step that does this. Until Task 13 live
+// verification confirms a resolution strategy, deep sync runs against
+// whatever clientId it is given as-is, which may be wrong for group clients.
 
 export interface ClientContact {
 	name: string;
@@ -106,8 +111,12 @@ export interface ClientContact {
 	address?: string;
 	phones: string[];
 	emails: string[];
-	employment?: string;
 	partner?: string;
+	// Partner rows read from the SAME page=client_contact tables (Telephone/
+	// Email (Partner), Address (Partner)) — couples only, empty for singles.
+	partnerPhones?: string[];
+	partnerEmails?: string[];
+	partnerAddress?: string;
 }
 
 export const parseClientContact = (raw: string): ClientContact => {
@@ -124,8 +133,10 @@ export const parseClientContact = (raw: string): ClientContact => {
 		address: str(x.address),
 		phones: arr(x.phones),
 		emails: arr(x.emails),
-		employment: str(x.employment),
-		partner: str(x.partner)
+		partner: str(x.partner),
+		partnerPhones: arr(x.partnerPhones),
+		partnerEmails: arr(x.partnerEmails),
+		partnerAddress: str(x.partnerAddress)
 	};
 };
 
@@ -219,7 +230,7 @@ export const PLAYBOOK: Record<string, XplanOperation> = {
 		],
 		outputFormat: 'json',
 		outputSpec:
-			'ONE JSON object: {"name":"...","preferredName":"...","dob":"YYYY-MM-DD or empty","address":"...","phones":["..."],"emails":["..."],"employment":"...","partner":"name or empty"} — empty string/array when a field is not shown. Partner fields stay empty for a single client (no partner tables).',
+			'ONE JSON object: {"name":"...","preferredName":"...","dob":"YYYY-MM-DD or empty","address":"...","phones":["..."],"emails":["..."],"partner":"name or empty","partnerPhones":["..."],"partnerEmails":["..."],"partnerAddress":"..."} — empty string/array when a field is not shown. Partner fields (partner, partnerPhones, partnerEmails, partnerAddress) stay empty for a single client (no partner tables). Employment is NOT on this page (it is a separate page=employment) — do not include it.',
 		parse: parseClientContact
 	},
 	'client.financials': {
@@ -228,7 +239,7 @@ export const PLAYBOOK: Record<string, XplanOperation> = {
 		reconDoc: 'docs/xplan-playbook/04-client-financials.md',
 		url: (p) => `${BASE}/factfind/view/${encodeURIComponent(p.clientId)}?role=client&page=balancesheet`,
 		navHints: [
-			'Superannuation is a SEPARATE factfind page (page=super) — do not try to combine it into this read; it is out of scope for this operation'
+			'Superannuation is a SEPARATE factfind page (page=super) read by its own operation (client.super) — do not try to combine it into this read'
 		],
 		extract: [
 			'every row in the Assets & Liabilities panels/tables: description/name, owner, value/balance, type',
@@ -286,7 +297,21 @@ export const PLAYBOOK: Record<string, XplanOperation> = {
 		],
 		outputFormat: 'lines',
 		outputSpec:
-			'one line per note: subject|type|date|snippet — snippet is the note body truncated to a short excerpt (not the full body). If the page shows none, output exactly: NONE',
+			'one line per note: subject|type|date|snippet — snippet is the note body truncated to a short excerpt (not the full body); REPLACE any "|" character inside the snippet text with "/" so it cannot be mistaken for a column delimiter. If the page shows none, output exactly: NONE',
+		parse: parsePipeTable
+	},
+	'client.super': {
+		id: 'client.super',
+		title: 'Read client superannuation & pension holdings',
+		reconDoc: 'docs/xplan-playbook/04-client-financials.md',
+		url: (p) => `${BASE}/factfind/view/${encodeURIComponent(p.clientId)}?role=client&page=super`,
+		extract: [
+			'every row in the Superannuation panels/tables: fund name, member, balance, type',
+			'if the panels show no rows, output NONE'
+		],
+		outputFormat: 'lines',
+		outputSpec:
+			'one line per super/pension holding: fundName|member|balance|type (cells joined with |). If the page shows none, output exactly: NONE (column order is recon\'s best-effort estimate pending Task 13 live verification — read the actual table headers if they differ)',
 		parse: parsePipeTable
 	}
 };

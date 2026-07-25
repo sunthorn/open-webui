@@ -21,13 +21,22 @@ const okDeps = () => {
 };
 
 describe('runClientDeepSync', () => {
-	it('runs the five sections sequentially, in order, saving after each', async () => {
+	it('runs the six sections sequentially, in order, saving after each', async () => {
 		const { calls, saves, deps } = okDeps();
 		const detail = await runClientDeepSync('111111', 'Testperson, Alex', deps);
 		expect(calls).toEqual(SECTION_OPS.map(([, opId]) => opId));
-		expect(saves).toHaveLength(5); // one save per section
-		expect(Object.keys(detail.sections)).toHaveLength(5);
+		expect(calls).toEqual([
+			'client.contact',
+			'client.financials',
+			'client.insurance',
+			'client.tasks',
+			'client.notes',
+			'client.super'
+		]);
+		expect(saves).toHaveLength(6); // one save per section
+		expect(Object.keys(detail.sections)).toHaveLength(6);
 		expect(detail.sections.contact?.status).toBe('ok');
+		expect(detail.sections.super?.status).toBe('ok');
 	});
 	it('marks a failed section error and CONTINUES with the rest', async () => {
 		const { deps } = okDeps();
