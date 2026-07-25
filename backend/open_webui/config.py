@@ -405,7 +405,7 @@ OPENAI_API_BASE_URLS = ConfigVar('OPENAI_API_BASE_URLS', 'openai.api_base_urls',
 OPENAI_API_CONFIGS = ConfigVar(
     'OPENAI_API_CONFIGS',
     'openai.api_configs',
-    {},
+    json.loads(os.getenv('OPENAI_API_CONFIGS', '{}')),
 )
 
 # Get the actual OpenAI API key based on the base URL
