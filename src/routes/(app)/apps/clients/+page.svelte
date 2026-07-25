@@ -104,7 +104,7 @@
 
 	const pickExisting = (name: string, id = '') => {
 		setActiveClient({ id: id || '', name, mode: 'existing', since: nowIso() });
-		goto('/apps/data-entry');
+		goto('/apps/clients/detail');
 	};
 
 	const createNew = async () => {
