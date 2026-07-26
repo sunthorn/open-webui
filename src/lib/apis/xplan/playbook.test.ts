@@ -6,7 +6,9 @@ import {
 	parseBriefingItems,
 	parseClientContact,
 	parsePipeTable,
-	parseClientTasks
+	parseClientTasks,
+	parseBookSweep,
+	type BookSweepResult
 } from './playbook';
 
 // clients.search now reads XPLAN's internal /resourceful/entity JSON resource
@@ -56,6 +58,29 @@ describe('parseBookPage (clients.bookPage)', () => {
 	});
 	it('reads TOTAL=0 as an empty page', () => {
 		expect(parseBookPage('TOTAL=0')).toEqual({ total: 0, rows: [] });
+	});
+});
+
+describe('parseBookSweep', () => {
+	it('parses total, reachedEnd and rows (name + id)', () => {
+		const raw = JSON.stringify({ total: 757, reachedEnd: false, rows: [{ name: 'Butler, Lucia', id: 715828 }, { name: 'Ng, Sam', id: '720240' }] });
+		const r = parseBookSweep(raw);
+		expect(r.total).toBe(757);
+		expect(r.reachedEnd).toBe(false);
+		expect(r.rows).toEqual([{ name: 'Butler, Lucia', id: '715828' }, { name: 'Ng, Sam', id: '720240' }]);
+	});
+	it('coerces missing/blank total to 0 and defaults reachedEnd false', () => {
+		const r = parseBookSweep(JSON.stringify({ rows: [] }));
+		expect(r.total).toBe(0);
+		expect(r.reachedEnd).toBe(false);
+		expect(r.rows).toEqual([]);
+	});
+	it('drops rows with a blank name, keeps blank id as empty string', () => {
+		const r = parseBookSweep(JSON.stringify({ total: 2, reachedEnd: true, rows: [{ name: '', id: 1 }, { name: 'A, B', id: null }] }));
+		expect(r.rows).toEqual([{ name: 'A, B', id: '' }]);
+	});
+	it('throws the standard format error on non-JSON', () => {
+		expect(() => parseBookSweep('not json')).toThrow(/unexpected format/i);
 	});
 });
 

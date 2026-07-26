@@ -77,6 +77,29 @@ export const parseBookPage = (raw: string): ClientPage => {
 	return { total, rows };
 };
 
+export interface BookSweepResult {
+	total: number; // total entities XPLAN reports ("… of 757"), 0 if unknown
+	reachedEnd: boolean; // true once the last results page has been read
+	rows: XplanClient[];
+}
+
+export const parseBookSweep = (raw: string): BookSweepResult => {
+	const x = jsonOf(raw) as Record<string, unknown>;
+	if (!x || typeof x !== 'object' || Array.isArray(x)) {
+		throw new Error('XPLAN returned an unexpected format. Try again.');
+	}
+	const rowsIn = Array.isArray(x.rows) ? x.rows : [];
+	const rows: XplanClient[] = rowsIn
+		.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+		.map((c) => ({ name: String(c.name ?? '').trim(), id: String(c.id ?? '') }))
+		.filter((c) => c.name.length > 0);
+	return {
+		total: Number.isFinite(Number(x.total)) ? Number(x.total) : 0,
+		reachedEnd: !!x.reachedEnd,
+		rows
+	};
+};
+
 export const parseBriefingItems = (raw: string): RawBriefingItem[] => {
 	const parsed = jsonOf(raw);
 	if (!Array.isArray(parsed)) return [];
