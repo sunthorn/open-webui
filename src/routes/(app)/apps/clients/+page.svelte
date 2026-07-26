@@ -73,15 +73,17 @@
 		}
 	});
 
-	// Manual sync — sweeps the XPLAN client book page by page into axi
-	// (token-spending). Bulk table reads are slow, so the sweep is RESILIENT and
-	// RESUMABLE rather than all-or-nothing:
-	//  • each page gets a generous timeout and one retry;
-	//  • a page that still fails stops the sweep but saves a resume cursor
-	//    (nextPage) — clicking Sync again continues from that exact page instead
-	//    of discarding the whole run (the old behaviour on a single timeout);
-	//  • progress is persisted after every page; a resume seeds from the saved
-	//    book so nothing already synced is lost or needlessly re-read.
+	// Manual sync — sweeps the XPLAN client book in BATCHES of pages from a
+	// SINGLE search (navigate once, then only click Next) so XPLAN's "one search
+	// at a time" modal never fires. Token-spending; built to be resilient:
+	//  • each batch gets a generous timeout and one retry;
+	//  • rows accumulate into a Map keyed by entity id, so re-reads at batch
+	//    boundaries (or a resume that re-anchors the search) dedupe harmlessly;
+	//  • progress is persisted after every batch. `nextPage` is now just a
+	//    sentinel — 1 = complete/fresh, 2 = partial. A Stop/failure leaves a
+	//    partial; Resume RE-RUNS the sweep and dedupe skips what's already
+	//    synced (correctness never depends on the browser tab staying put — the
+	//    trade-off is a resume re-reads from the front rather than a page cursor).
 	const PAGES_PER_BATCH = 3;
 	const MAX_BATCHES = 12; // 12 × 3 = 36 pages — well past 757/100=8, a safety cap
 	const BATCH_TIMEOUT_MS = 150_000;
@@ -165,7 +167,11 @@
 					if (!map.has(k)) map.set(k, c);
 				}
 				const added = map.size - before;
-				const done = res.reachedEnd || (!!total && map.size >= total);
+				// Complete only when a KNOWN total is reached, or reachedEnd is
+				// reported and no total is known to check against. A premature
+				// reachedEnd (agent misreads the pager) while short of a known total
+				// must NOT mark the book complete — it stays partial/resumable.
+				const done = (!!total && map.size >= total) || (res.reachedEnd && !total);
 				await persistBook(map, done ? 1 : 2);
 				navigateFirst = false; // every subsequent batch pages the same search
 				if (done) break;
@@ -262,7 +268,7 @@
 			<span class="text-red-500">{syncErr}</span>
 		{:else if book.length && bookNextPage > 1}
 			<span class="text-amber-600 dark:text-amber-400">{book.length} synced so far · partial</span> — click
-			<span class="font-medium">Resume sync</span> to continue from page {bookNextPage}.
+			<span class="font-medium">Resume sync</span> to finish the book.
 		{:else if book.length}
 			{book.length} clients synced{bookSyncedAt ? ` · ${fmt(bookSyncedAt)}` : ''}. Searching your local copy.
 		{:else}
