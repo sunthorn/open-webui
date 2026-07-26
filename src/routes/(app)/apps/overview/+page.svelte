@@ -8,7 +8,8 @@
 	import {
 		syncXplanOverview,
 		gatherXplanBriefing,
-		computeBriefing
+		computeBriefing,
+		XplanCancelledError
 	} from '$lib/apis/xplan';
 	import {
 		getOverviewSnapshot,
@@ -55,13 +56,19 @@
 	let syncedAt = '';
 	let syncErr = '';
 
+	// Stop controls — each agent read can be aborted mid-flight.
+	let syncCtrl: AbortController | null = null;
+	let briefCtrl: AbortController | null = null;
+	const stopSync = () => syncCtrl?.abort();
+	const stopBriefing = () => briefCtrl?.abort();
+
+	// Full timestamp: dd/mm/yy hh:mm (24h).
 	const fmt = (iso: string) => {
 		if (!iso) return '';
 		const d = new Date(iso);
-		const sameDay = d.toDateString() === new Date().toDateString();
-		return sameDay
-			? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-			: d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+		if (isNaN(d.getTime())) return iso;
+		const p = (n: number) => String(n).padStart(2, '0');
+		return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 	};
 
 	$: briefingEmpty =
@@ -139,9 +146,10 @@
 	const refreshBriefing = async () => {
 		briefingState = 'loading';
 		briefingErr = '';
+		briefCtrl = new AbortController();
 		try {
 			const t = token();
-			const raw = await gatherXplanBriefing(t);
+			const raw = await gatherXplanBriefing(t, 120_000, briefCtrl.signal);
 			if (raw === 'NOT_LOGGED_IN') {
 				loggedIn = false;
 				briefingState = 'idle';
@@ -151,8 +159,14 @@
 			await saveBriefing(t, briefing);
 			briefingState = 'idle';
 		} catch (e: any) {
+			if (e instanceof XplanCancelledError) {
+				briefingState = 'idle'; // clean stop, not an error
+				return;
+			}
 			briefingErr = typeof e === 'string' ? e : (e?.message ?? 'Refresh failed');
 			briefingState = 'error';
+		} finally {
+			briefCtrl = null;
 		}
 	};
 
@@ -160,9 +174,10 @@
 	const syncDashboard = async () => {
 		syncState = 'loading';
 		syncErr = '';
+		syncCtrl = new AbortController();
 		try {
 			const t = token();
-			const summary = await syncXplanOverview(t);
+			const summary = await syncXplanOverview(t, 90_000, syncCtrl.signal);
 			if (summary.includes('NOT_LOGGED_IN')) {
 				loggedIn = false;
 				lines = [];
@@ -181,8 +196,14 @@
 				console.warn('Could not save overview snapshot:', e);
 			}
 		} catch (e: any) {
+			if (e instanceof XplanCancelledError) {
+				syncState = lines.length ? 'done' : 'idle'; // clean stop
+				return;
+			}
 			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
 			syncState = 'error';
+		} finally {
+			syncCtrl = null;
 		}
 	};
 </script>
@@ -288,6 +309,15 @@
 				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Dashboard read</h2>
 				<div class="flex items-center gap-3">
 					{#if syncedAt}<span class="text-xs text-gray-400">{fmt(syncedAt)}</span>{/if}
+					{#if syncState === 'loading'}
+						<button
+							on:click={stopSync}
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+						>
+							<span class="size-2 rounded-[2px] bg-red-500"></span>
+							Stop
+						</button>
+					{/if}
 					{#if connected}
 						<button
 							on:click={syncDashboard}
@@ -329,6 +359,15 @@
 				<div class="flex items-center gap-3">
 					{#if briefing?.compiledAt}
 						<span class="text-xs text-gray-400">Updated {fmt(briefing.compiledAt)}</span>
+					{/if}
+					{#if briefingState === 'loading'}
+						<button
+							on:click={stopBriefing}
+							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+						>
+							<span class="size-2 rounded-[2px] bg-red-500"></span>
+							Stop
+						</button>
 					{/if}
 					{#if connected}
 						<button

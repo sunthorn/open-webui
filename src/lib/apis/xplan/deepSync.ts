@@ -1,7 +1,7 @@
 // Deep client sync: six sequential catalog reads, merged into one
 // ClientDetail document, saved progressively. Spec §6.
 // Types MIRROR shared-contracts/api-responses.ts (hand-sync convention).
-import { XplanNotLoggedInError } from './index';
+import { XplanNotLoggedInError, XplanCancelledError } from './index';
 
 export type ClientSectionName = 'contact' | 'financials' | 'insurance' | 'tasks' | 'notes' | 'super';
 
@@ -48,7 +48,9 @@ const runSection = async (
 		detail.sections[section] = { status: 'ok', syncedAt: new Date().toISOString(), data };
 		deps.onProgress?.(section, 'ok');
 	} catch (e) {
-		if (e instanceof XplanNotLoggedInError) throw e; // abort the whole sequence
+		// NOT_LOGGED_IN and a user Stop both abort the whole sequence — a cancel
+		// must not be recorded as a section "error".
+		if (e instanceof XplanNotLoggedInError || e instanceof XplanCancelledError) throw e;
 		detail.sections[section] = { status: 'error', syncedAt: new Date().toISOString(), data: null };
 		deps.onProgress?.(section, 'error');
 	}
@@ -59,14 +61,21 @@ export const runClientDeepSync = async (
 	clientId: string,
 	name: string,
 	deps: DeepSyncDeps,
-	base?: ClientDetail
+	base?: ClientDetail,
+	signal?: AbortSignal
 ): Promise<ClientDetail> => {
 	if (active) throw new Error('A client sync is already running. Wait for it to finish.');
 	active = true;
 	try {
 		const detail: ClientDetail = base ?? { clientId, name, sections: {} };
 		for (const [section, opId] of SECTION_OPS) {
-			await runSection(detail, section, opId, deps);
+			if (signal?.aborted) return detail; // Stopped between sections — keep partial.
+			try {
+				await runSection(detail, section, opId, deps);
+			} catch (e) {
+				if (e instanceof XplanCancelledError) return detail; // Stopped mid-section.
+				throw e; // NOT_LOGGED_IN (or other) aborts and propagates to the caller.
+			}
 		}
 		return detail;
 	} finally {
@@ -77,14 +86,21 @@ export const runClientDeepSync = async (
 export const resyncSection = async (
 	detail: ClientDetail,
 	section: ClientSectionName,
-	deps: DeepSyncDeps
+	deps: DeepSyncDeps,
+	signal?: AbortSignal
 ): Promise<ClientDetail> => {
 	if (active) throw new Error('A client sync is already running. Wait for it to finish.');
 	active = true;
 	try {
 		const opId = SECTION_OPS.find(([s]) => s === section)?.[1];
 		if (!opId) throw new Error(`Unknown section: ${section}`);
-		await runSection(detail, section, opId, deps);
+		if (signal?.aborted) return detail;
+		try {
+			await runSection(detail, section, opId, deps);
+		} catch (e) {
+			if (e instanceof XplanCancelledError) return detail; // Stopped — keep prior data.
+			throw e;
+		}
 		return detail;
 	} finally {
 		active = false;

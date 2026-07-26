@@ -15,6 +15,18 @@ export class XplanNotLoggedInError extends Error {
 }
 
 /**
+ * Thrown when the caller cancelled the operation via its AbortSignal (the Stop
+ * button), as opposed to an internal timeout. Callers should treat this as a
+ * clean stop — not a red error — and NOT retry.
+ */
+export class XplanCancelledError extends Error {
+	constructor() {
+		super('CANCELLED');
+		this.name = 'XplanCancelledError';
+	}
+}
+
+/**
  * Pull a human-readable string out of an error body. The OWUI proxy / hermes
  * can return the message as a plain string (`detail`/`error`) OR as a nested
  * object (OpenAI shape `{error: {message}}`, FastAPI `{detail: {msg}}`). Passing
@@ -42,11 +54,20 @@ export const runOperation = async <T = unknown>(
 	op: XplanOperation,
 	token: string,
 	params: Params = {},
-	fetchFn: typeof fetch = fetch
+	fetchFn: typeof fetch = fetch,
+	signal?: AbortSignal
 ): Promise<T> => {
 	const timeoutMs = op.timeoutMs ?? 120_000;
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	// Link an external Stop signal to our internal controller so a caller can
+	// abort the in-flight request. We track WHY we aborted (cancel vs timeout)
+	// to surface the right outcome.
+	const onCancel = () => controller.abort();
+	if (signal) {
+		if (signal.aborted) controller.abort();
+		else signal.addEventListener('abort', onCancel, { once: true });
+	}
 	try {
 		const res = await fetchFn(`${WEBUI_BASE_URL}/openai/chat/completions`, {
 			method: 'POST',
@@ -69,11 +90,14 @@ export const runOperation = async <T = unknown>(
 		return op.parse(stripped) as T;
 	} catch (e: any) {
 		if (e?.name === 'AbortError') {
+			// External Stop takes priority over the timeout race.
+			if (signal?.aborted) throw new XplanCancelledError();
 			throw new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s — is XPLAN unlocked and reachable?`);
 		}
 		throw e;
 	} finally {
 		clearTimeout(timer);
+		signal?.removeEventListener('abort', onCancel);
 	}
 };
 
@@ -104,9 +128,13 @@ export interface PlannerOverview {
  * @returns the summary text (may be `NOT_LOGGED_IN`)
  * @throws on transport / backend error
  */
-export const syncXplanOverview = async (token: string, timeoutMs = 90_000): Promise<string> => {
+export const syncXplanOverview = async (
+	token: string,
+	timeoutMs = 90_000,
+	signal?: AbortSignal
+): Promise<string> => {
 	try {
-		return await runOperation<string>({ ...PLAYBOOK['overview.summary'], timeoutMs }, token);
+		return await runOperation<string>({ ...PLAYBOOK['overview.summary'], timeoutMs }, token, {}, fetch, signal);
 	} catch (e) {
 		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;
@@ -145,12 +173,17 @@ export const searchXplanClients = async (
 export const gatherXplanClientPage = async (
 	token: string,
 	page = 1,
-	timeoutMs = 120_000
+	timeoutMs = 120_000,
+	signal?: AbortSignal
 ): Promise<ClientPage | 'NOT_LOGGED_IN'> => {
 	try {
-		return await runOperation<ClientPage>({ ...PLAYBOOK['clients.bookPage'], timeoutMs }, token, {
-			page: String(page)
-		});
+		return await runOperation<ClientPage>(
+			{ ...PLAYBOOK['clients.bookPage'], timeoutMs },
+			token,
+			{ page: String(page) },
+			fetch,
+			signal
+		);
 	} catch (e) {
 		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;
@@ -236,10 +269,17 @@ export const computeBriefing = (raw: RawBriefingItem[], today = new Date()): Dai
  */
 export const gatherXplanBriefing = async (
 	token: string,
-	timeoutMs = 120_000
+	timeoutMs = 120_000,
+	signal?: AbortSignal
 ): Promise<RawBriefingItem[] | 'NOT_LOGGED_IN'> => {
 	try {
-		return await runOperation<RawBriefingItem[]>({ ...PLAYBOOK['briefing.gather'], timeoutMs }, token);
+		return await runOperation<RawBriefingItem[]>(
+			{ ...PLAYBOOK['briefing.gather'], timeoutMs },
+			token,
+			{},
+			fetch,
+			signal
+		);
 	} catch (e) {
 		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runClientDeepSync, resyncSection, SECTION_OPS } from './deepSync';
-import { XplanNotLoggedInError } from './index';
+import { XplanNotLoggedInError, XplanCancelledError } from './index';
 
 const okDeps = () => {
 	const calls: string[] = [];
@@ -57,6 +57,27 @@ describe('runClientDeepSync', () => {
 		});
 		await expect(runClientDeepSync('111111', 'T', deps)).rejects.toBeInstanceOf(XplanNotLoggedInError);
 		expect(calls).toEqual(['client.contact', 'client.financials']); // nothing after
+	});
+	it('STOPS cleanly on cancel — returns the partial detail, does not throw or record the cancelled section', async () => {
+		const { calls, deps } = okDeps();
+		(deps.run as ReturnType<typeof vi.fn>).mockImplementation(async (opId: string) => {
+			calls.push(opId);
+			if (opId === 'client.insurance') throw new XplanCancelledError();
+			return {};
+		});
+		const detail = await runClientDeepSync('1', 'T', deps); // resolves, not rejects
+		expect(calls).toEqual(['client.contact', 'client.financials', 'client.insurance']); // stopped here
+		expect(detail.sections.contact?.status).toBe('ok');
+		expect(detail.sections.insurance).toBeUndefined(); // cancel not recorded as data
+		expect(detail.sections.tasks).toBeUndefined(); // nothing after
+	});
+	it('does not start any section when the signal is already aborted', async () => {
+		const { calls, deps } = okDeps();
+		const ac = new AbortController();
+		ac.abort();
+		const detail = await runClientDeepSync('1', 'T', deps, undefined, ac.signal);
+		expect(calls).toEqual([]);
+		expect(Object.keys(detail.sections)).toHaveLength(0);
 	});
 	it('refuses to run two syncs at once', async () => {
 		const { deps } = okDeps();

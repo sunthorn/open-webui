@@ -3,13 +3,22 @@
 	// document through the contact-layer gateway (built overnight by hermes; for
 	// now it may be manually seeded). Slice: Phase 4 walking skeleton.
 	import { onMount } from 'svelte';
-	import { getBriefing, type DailyBriefing, type BriefingItem } from '$lib/apis/gateway';
+	import { getBriefing, saveBriefing, type DailyBriefing, type BriefingItem } from '$lib/apis/gateway';
+	import { gatherXplanBriefing, computeBriefing, XplanCancelledError } from '$lib/apis/xplan';
 
 	type State = 'loading' | 'empty' | 'error' | 'ready';
 	let state: State = 'loading';
 	let errorMsg = '';
 	let briefing: DailyBriefing | null = null;
 	let greeting = 'Hello';
+
+	// Live refresh (spends tokens) — reads today's tasks/diary from XPLAN and
+	// rebuilds the briefing, vs the initial mount which just reads the stored one.
+	let refreshing = false;
+	let refreshErr = '';
+	let notLoggedIn = false;
+	let refreshCtrl: AbortController | null = null;
+	const stopRefresh = () => refreshCtrl?.abort();
 
 	$: sections = briefing
 		? [
@@ -41,20 +50,46 @@
 		}
 	};
 
+	// SPENDS TOKENS — pull a fresh briefing live from XPLAN (needs XPLAN connected
+	// on Home). Stoppable mid-read.
+	const refresh = async () => {
+		if (refreshing) return;
+		refreshing = true;
+		refreshErr = '';
+		notLoggedIn = false;
+		refreshCtrl = new AbortController();
+		try {
+			const token = localStorage.getItem('token') ?? '';
+			const raw = await gatherXplanBriefing(token, 120_000, refreshCtrl.signal);
+			if (raw === 'NOT_LOGGED_IN') {
+				notLoggedIn = true;
+				return;
+			}
+			briefing = computeBriefing(raw);
+			await saveBriefing(token, briefing);
+			state = 'ready';
+		} catch (e: any) {
+			if (e instanceof XplanCancelledError) return; // clean stop, not an error
+			refreshErr = typeof e === 'string' ? e : (e?.message ?? 'Refresh failed');
+		} finally {
+			refreshing = false;
+			refreshCtrl = null;
+		}
+	};
+
 	onMount(() => {
 		const h = new Date().getHours();
 		greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 		load();
 	});
 
+	// Full timestamp: dd/mm/yy hh:mm (24h).
 	const compiledLabel = (iso: string) => {
-		try {
-			return new Date(iso).toLocaleString(undefined, {
-				weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
-			});
-		} catch {
-			return iso;
-		}
+		if (!iso) return '';
+		const d = new Date(iso);
+		if (isNaN(d.getTime())) return iso;
+		const p = (n: number) => String(n).padStart(2, '0');
+		return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 	};
 </script>
 
@@ -66,14 +101,41 @@
 				Your briefing{#if briefing} · compiled {compiledLabel(briefing.compiledAt)} · {briefing.sources.join(', ')}{/if}
 			</p>
 		</div>
-		<button
-			on:click={load}
-			disabled={state === 'loading'}
-			class="shrink-0 text-sm font-medium px-3.5 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 transition"
-		>
-			{state === 'loading' ? 'Loading…' : 'Reload'}
-		</button>
+		<div class="shrink-0 flex items-center gap-2">
+			{#if refreshing}
+				<button
+					on:click={stopRefresh}
+					class="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+				>
+					<span class="size-2 rounded-[2px] bg-red-500"></span>
+					Stop
+				</button>
+			{/if}
+			<button
+				on:click={refresh}
+				disabled={refreshing || state === 'loading'}
+				class="inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 transition"
+			>
+				{#if refreshing}
+					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+					Reading…
+				{:else}
+					Refresh from XPLAN
+				{/if}
+			</button>
+		</div>
 	</div>
+
+	{#if notLoggedIn}
+		<div class="mb-5 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-3">
+			XPLAN not connected — open <span class="font-medium">Home</span> and connect first, then refresh.
+		</div>
+	{/if}
+	{#if refreshErr}
+		<div class="mb-5 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">
+			{refreshErr}
+		</div>
+	{/if}
 
 	{#if state === 'loading'}
 		<p class="text-sm text-gray-500">Loading your briefing…</p>

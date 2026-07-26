@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runOperation, XplanNotLoggedInError } from './index';
+import { runOperation, XplanNotLoggedInError, XplanCancelledError } from './index';
 import type { XplanOperation } from './playbook';
 
 const op: XplanOperation = {
@@ -49,5 +49,17 @@ describe('runOperation', () => {
 		const fetchFn = vi.fn(async () =>
 			({ ok: false, status: 503, json: async () => ({ error: { code: 42 } }) }) as unknown as Response);
 		await expect(runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch)).rejects.toThrow('HTTP 503');
+	});
+	it('throws XplanCancelledError (not a timeout) when the caller aborts', async () => {
+		const ac = new AbortController();
+		ac.abort();
+		// A real fetch rejects with an AbortError once its signal is aborted.
+		const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+			if (init?.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+			return okResponse('hi');
+		});
+		await expect(
+			runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch, ac.signal)
+		).rejects.toBeInstanceOf(XplanCancelledError);
 	});
 });

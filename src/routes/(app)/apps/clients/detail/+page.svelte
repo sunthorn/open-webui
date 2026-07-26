@@ -9,7 +9,12 @@
 	import { activeClient } from '$lib/apps/activeClient';
 	import { getOutput, putOutput } from '$lib/apis/gateway';
 	import { PLAYBOOK } from '$lib/apis/xplan/playbook';
-	import { runOperation, XplanNotLoggedInError, type RawBriefingItem } from '$lib/apis/xplan';
+	import {
+		runOperation,
+		XplanNotLoggedInError,
+		XplanCancelledError,
+		type RawBriefingItem
+	} from '$lib/apis/xplan';
 	import type { ClientContact } from '$lib/apis/xplan/playbook';
 	import {
 		runClientDeepSync,
@@ -65,6 +70,10 @@
 	let progress = 0; // sections completed in the CURRENT full-sync run only
 	let error = '';
 	let notLoggedIn = false;
+	// Stop control — aborts the in-flight section read and halts the remaining
+	// sections of a full sync.
+	let syncCtrl: AbortController | null = null;
+	const stopSync = () => syncCtrl?.abort();
 
 	const ALREADY_RUNNING = 'A sync is already running — try again in a moment.';
 
@@ -102,8 +111,9 @@
 	const statusDot = (s?: ClientSection) =>
 		!s ? 'bg-gray-300 dark:bg-gray-700' : s.status === 'ok' ? 'bg-green-500' : 'bg-red-500';
 
-	const deps = () => ({
-		run: (opId: string, params: Record<string, string>) => runOperation(PLAYBOOK[opId], token(), params),
+	const deps = (signal?: AbortSignal) => ({
+		run: (opId: string, params: Record<string, string>) =>
+			runOperation(PLAYBOOK[opId], token(), params, fetch, signal),
 		save: async (d: ClientDetail) => {
 			detail = { ...d };
 			await putOutput(token(), `client:${d.clientId}`, 'client_detail', d);
@@ -130,15 +140,19 @@
 		notLoggedIn = false;
 		progress = 0;
 		fullSyncActive = true;
+		syncCtrl = new AbortController();
 		try {
-			await runClientDeepSync(client.id, client.name, deps(), detail ?? undefined);
+			await runClientDeepSync(client.id, client.name, deps(syncCtrl.signal), detail ?? undefined, syncCtrl.signal);
 		} catch (e) {
-			if (e instanceof XplanNotLoggedInError) notLoggedIn = true;
+			if (e instanceof XplanCancelledError) {
+				/* clean stop — partial sections are already saved */
+			} else if (e instanceof XplanNotLoggedInError) notLoggedIn = true;
 			else if (e instanceof Error && /already running/i.test(e.message)) error = ALREADY_RUNNING;
 			else error = e instanceof Error ? e.message : String(e);
 		} finally {
 			syncing = null;
 			fullSyncActive = false;
+			syncCtrl = null;
 		}
 	};
 
@@ -150,14 +164,18 @@
 		}
 		error = '';
 		notLoggedIn = false;
+		syncCtrl = new AbortController();
 		try {
-			await resyncSection(detail, section, deps());
+			await resyncSection(detail, section, deps(syncCtrl.signal), syncCtrl.signal);
 		} catch (e) {
-			if (e instanceof XplanNotLoggedInError) notLoggedIn = true;
+			if (e instanceof XplanCancelledError) {
+				/* clean stop */
+			} else if (e instanceof XplanNotLoggedInError) notLoggedIn = true;
 			else if (e instanceof Error && /already running/i.test(e.message)) error = ALREADY_RUNNING;
 			else error = e instanceof Error ? e.message : String(e);
 		} finally {
 			syncing = null;
+			syncCtrl = null;
 		}
 	};
 
@@ -211,6 +229,7 @@
 	{:else}
 		<!-- Full sync -->
 		<div class="flex items-center justify-between gap-3 mb-6">
+			<div class="flex items-center gap-2">
 			<button
 				on:click={fullSync}
 				disabled={busy}
@@ -226,6 +245,16 @@
 					{detail && isFresh ? 'Refresh' : 'Sync full details from XPLAN'}
 				{/if}
 			</button>
+			{#if busy}
+				<button
+					on:click={stopSync}
+					class="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+				>
+					<span class="size-2 rounded-[2px] bg-red-500"></span>
+					Stop
+				</button>
+			{/if}
+			</div>
 			{#if detail}
 				<span class="text-xs text-gray-400">Newest section {fmtAge(new Date(newestSync).toISOString())}</span>
 			{/if}
