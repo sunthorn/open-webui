@@ -15,12 +15,17 @@ const interpolate = (s: string, p: Params): string =>
 export const buildPrompt = (op: XplanOperation, params: Params = {}): string => {
 	const p = sanitize(params);
 	const url = typeof op.url === 'function' ? op.url(p) : op.url;
+	const opening = url
+		? ['Do EXACTLY this and nothing more: call browser_navigate once to', url]
+		: [
+				'Do EXACTLY this and nothing more. Do NOT navigate and do NOT re-run any',
+				'search — the browser is already on the correct results page.'
+			];
 	const lines = [
 		'You are connected to a browser already logged in to XPLAN (IRESS financial',
 		'planning software) for a financial planner.',
 		'',
-		'Do EXACTLY this and nothing more: call browser_navigate once to',
-		url,
+		...opening,
 		...(op.navHints ?? []).map((h) => `Then: ${interpolate(h, p)}`),
 		...(op.maxScrolls
 			? [`You may scroll the page at most ${op.maxScrolls} time(s) to reveal the full table.`]
@@ -34,7 +39,9 @@ export const buildPrompt = (op: XplanOperation, params: Params = {}): string => 
 		'Output nothing else.',
 		'',
 		'If you are not logged in, output exactly: NOT_LOGGED_IN',
-		'Do NOT use browser_cdp, execute_code, or browser_snapshot. Do not loop.'
+		`Do NOT use browser_cdp, execute_code, or browser_snapshot. ${
+			op.paging ? 'Do not loop beyond the paging described above.' : 'Do not loop.'
+		}`
 	];
 	return lines.join('\n');
 };

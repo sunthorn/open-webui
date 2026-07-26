@@ -15,6 +15,7 @@ export interface XplanOperation {
 	parse: (raw: string) => unknown; // paired strict parser
 	timeoutMs?: number; // default 120_000
 	maxScrolls?: number; // default 0 = no scrolling
+	paging?: boolean; // op legitimately clicks through pages (softens the no-loop rail)
 }
 
 // --- Migrated operations (Task 7) ------------------------------------------

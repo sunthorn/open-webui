@@ -73,3 +73,34 @@ describe('buildPrompt {key} interpolation', () => {
 		expect(prompt).not.toContain('{query}');
 	});
 });
+
+describe('buildPrompt empty url and paging', () => {
+	it('emits a do-NOT-navigate opening when the resolved url is empty', () => {
+		const noNav: XplanOperation = {
+			id: 'x.more', title: 'T', reconDoc: 'd',
+			url: () => '', extract: ['rows'], outputFormat: 'json', outputSpec: 'json',
+			parse: (r) => r
+		};
+		const prompt = buildPrompt(noNav, {});
+		expect(prompt).toMatch(/do NOT navigate/i);
+		expect(prompt).not.toContain('browser_navigate once to');
+	});
+	it('emits the navigate opening when the url is present', () => {
+		const nav: XplanOperation = {
+			id: 'x.start', title: 'T', reconDoc: 'd',
+			url: () => 'https://example.invalid/p', extract: ['rows'], outputFormat: 'json', outputSpec: 'json',
+			parse: (r) => r
+		};
+		const prompt = buildPrompt(nav, {});
+		expect(prompt).toContain('browser_navigate once to');
+		expect(prompt).toContain('https://example.invalid/p');
+	});
+	it('softens the no-loop rail for paging ops but keeps forbidden tools', () => {
+		const base = { id: 'x', title: 'T', reconDoc: 'd', extract: ['r'], outputFormat: 'json' as const, outputSpec: 'json', parse: (r: string) => r, url: 'https://example.invalid/p' };
+		const paging = buildPrompt({ ...base, paging: true }, {});
+		const plain = buildPrompt(base, {});
+		expect(paging).toMatch(/Do not loop beyond the paging/i);
+		expect(plain).toContain('Do not loop.');
+		expect(paging).toContain('browser_cdp');
+	});
+});
