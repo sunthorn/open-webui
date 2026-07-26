@@ -15,6 +15,25 @@ export class XplanNotLoggedInError extends Error {
 }
 
 /**
+ * Pull a human-readable string out of an error body. The OWUI proxy / hermes
+ * can return the message as a plain string (`detail`/`error`) OR as a nested
+ * object (OpenAI shape `{error: {message}}`, FastAPI `{detail: {msg}}`). Passing
+ * such an object to `new Error(...)` stringifies it to the useless literal
+ * "[object Object]" — this digs out the actual message instead.
+ */
+const errMessage = (body: any, status: number): string => {
+	const pick = (v: any): string | undefined => {
+		if (!v) return undefined;
+		if (typeof v === 'string') return v;
+		if (typeof v.message === 'string') return v.message;
+		if (typeof v.detail === 'string') return v.detail;
+		if (typeof v.msg === 'string') return v.msg;
+		return undefined;
+	};
+	return pick(body?.detail) ?? pick(body?.error) ?? pick(body) ?? `Request failed (HTTP ${status})`;
+};
+
+/**
  * Run one catalog operation via hermes. THE single transport for all XPLAN
  * reads: prompt from the catalog, OWUI light proxy, timeout, sentinel check,
  * fence-strip, strict parse.
@@ -41,7 +60,7 @@ export const runOperation = async <T = unknown>(
 		});
 		if (!res.ok) {
 			const detail = await res.json().catch(() => ({}));
-			throw new Error((detail as any)?.detail ?? (detail as any)?.error ?? `HTTP ${res.status}`);
+			throw new Error(errMessage(detail, res.status));
 		}
 		const data = await res.json();
 		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();

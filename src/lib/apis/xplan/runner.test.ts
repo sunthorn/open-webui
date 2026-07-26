@@ -38,4 +38,16 @@ describe('runOperation', () => {
 			({ ok: false, status: 500, json: async () => ({ detail: 'boom' }) }) as unknown as Response);
 		await expect(runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch)).rejects.toThrow('boom');
 	});
+	it('extracts the message from an OpenAI-shaped object error (no "[object Object]")', async () => {
+		const fetchFn = vi.fn(async () =>
+			({ ok: false, status: 502, json: async () => ({ error: { message: 'browser has no page target' } }) }) as unknown as Response);
+		const err = await runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch).catch((e) => e);
+		expect(err.message).toBe('browser has no page target');
+		expect(err.message).not.toContain('[object Object]');
+	});
+	it('falls back to an HTTP message when the error body has no string message', async () => {
+		const fetchFn = vi.fn(async () =>
+			({ ok: false, status: 503, json: async () => ({ error: { code: 42 } }) }) as unknown as Response);
+		await expect(runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch)).rejects.toThrow('HTTP 503');
+	});
 });
