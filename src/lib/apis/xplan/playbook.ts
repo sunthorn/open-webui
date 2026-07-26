@@ -27,11 +27,6 @@ export interface XplanClient {
 	id: string; // XPLAN entity id if extractable, else ''
 }
 
-export interface ClientPage {
-	total: number; // total clients reported by XPLAN ("… of 1817"), 0 if unknown
-	rows: XplanClient[];
-}
-
 export interface RawBriefingItem {
 	title: string;
 	client?: string;
@@ -59,22 +54,6 @@ export const parseClientList = (raw: string): XplanClient[] => {
 		.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
 		.filter((c) => String(c.entity_name ?? '').trim().length > 0)
 		.map((c) => ({ name: String(c.entity_name).trim(), id: String(c.entity_id ?? '') }));
-};
-
-export const parseBookPage = (raw: string): ClientPage => {
-	let total = 0;
-	const rows: XplanClient[] = [];
-	for (const line of raw.split('\n').map((l) => l.trim()).filter(Boolean)) {
-		const m = line.match(/^TOTAL\s*=\s*(\d+)/i);
-		if (m) {
-			total = parseInt(m[1], 10) || 0;
-			continue;
-		}
-		const [namePart, idPart = ''] = line.split('|');
-		const name = namePart.trim();
-		if (name && !/^total\s*=/i.test(name)) rows.push({ name, id: idPart.trim() });
-	}
-	return { total, rows };
 };
 
 export interface BookSweepResult {
@@ -208,23 +187,6 @@ export const PLAYBOOK: Record<string, XplanOperation> = {
 		outputFormat: 'json',
 		outputSpec: "output the page's JSON array VERBATIM, exactly as rendered, and nothing else",
 		parse: parseClientList
-	},
-	'clients.bookPage': {
-		id: 'clients.bookPage',
-		title: 'Read one page of the client book',
-		reconDoc: 'docs/xplan-playbook/02-client-search.md',
-		url: `${BASE}/factfind/search/result?role=client`,
-		navHints: [
-			'if {page} is greater than 1, use the results pager at the bottom of the table to go to results page {page}'
-		],
-		extract: [
-			'EVERY client row in the results table on the CURRENT page — do not stop early',
-			'if the results table shows zero client rows, output TOTAL=0 and nothing else'
-		],
-		outputFormat: 'lines',
-		outputSpec:
-			'FIRST line: TOTAL=<total client count shown, e.g. from "1 to 100 of 1817">, else TOTAL=0. THEN one line per client: name|id (id from the row link href, or empty)',
-		parse: parseBookPage
 	},
 	'briefing.gather': {
 		id: 'briefing.gather',

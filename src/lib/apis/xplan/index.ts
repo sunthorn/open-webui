@@ -2,9 +2,9 @@ import { WEBUI_BASE_URL } from '$lib/constants';
 import type { Params, XplanOperation, BookSweepResult } from './playbook';
 import { buildPrompt } from './prompt';
 import { PLAYBOOK } from './playbook';
-import type { XplanClient, ClientPage, RawBriefingItem } from './playbook';
+import type { XplanClient, RawBriefingItem } from './playbook';
 
-export { type XplanClient, type ClientPage, type RawBriefingItem, type BookSweepResult } from './playbook';
+export { type XplanClient, type RawBriefingItem, type BookSweepResult } from './playbook';
 
 /** Thrown when XPLAN reports the browser session is not logged in. */
 export class XplanNotLoggedInError extends Error {
@@ -165,30 +165,6 @@ export const searchXplanClients = async (
 // --- Client book sync -----------------------------------------------------
 // Navigate the deterministic client-results URL (which RENDERS the list — no
 // search form to operate, unlike the flaky live search) and extract the table.
-
-/**
- * Sync ONE page of the XPLAN client book via hermes.
- * @returns { total, rows }, or the sentinel 'NOT_LOGGED_IN'.
- */
-export const gatherXplanClientPage = async (
-	token: string,
-	page = 1,
-	timeoutMs = 120_000,
-	signal?: AbortSignal
-): Promise<ClientPage | 'NOT_LOGGED_IN'> => {
-	try {
-		return await runOperation<ClientPage>(
-			{ ...PLAYBOOK['clients.bookPage'], timeoutMs },
-			token,
-			{ page: String(page) },
-			fetch,
-			signal
-		);
-	} catch (e) {
-		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
-		throw e;
-	}
-};
 
 /**
  * Sweep ONE batch of the client book (up to `pages` pages) from a single

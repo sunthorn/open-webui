@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
 	PLAYBOOK,
 	parseClientList,
-	parseBookPage,
 	parseBriefingItems,
 	parseClientContact,
 	parsePipeTable,
@@ -40,25 +39,6 @@ describe('parseClientList (clients.search)', () => {
 	});
 	it('throws on non-JSON', () => {
 		expect(() => parseClientList('the search returned some clients')).toThrow(/unexpected format/i);
-	});
-});
-
-describe('parseBookPage (clients.bookPage)', () => {
-	it('reads TOTAL= and name|id lines', () => {
-		const raw = 'TOTAL=1817\nTestperson, Alex|111111\nSample, Bo|';
-		expect(parseBookPage(raw)).toEqual({
-			total: 1817,
-			rows: [
-				{ name: 'Testperson, Alex', id: '111111' },
-				{ name: 'Sample, Bo', id: '' }
-			]
-		});
-	});
-	it('tolerates a missing TOTAL line', () => {
-		expect(parseBookPage('Only, Row|9').total).toBe(0);
-	});
-	it('reads TOTAL=0 as an empty page', () => {
-		expect(parseBookPage('TOTAL=0')).toEqual({ total: 0, rows: [] });
 	});
 });
 
@@ -103,7 +83,7 @@ describe('parseBriefingItems (briefing.gather)', () => {
 
 describe('PLAYBOOK migrated entries', () => {
 	it('has the four migrated operations', () => {
-		for (const id of ['overview.summary', 'clients.search', 'clients.bookPage', 'briefing.gather']) {
+		for (const id of ['overview.summary', 'clients.search', 'briefing.gather']) {
 			expect(PLAYBOOK[id], id).toBeDefined();
 			expect(PLAYBOOK[id].id).toBe(id);
 			expect(PLAYBOOK[id].reconDoc).toMatch(/^docs\/xplan-playbook\//);
@@ -129,11 +109,6 @@ describe('PLAYBOOK migrated entries', () => {
 		// The injected "roles.0=user" must stay encoded — only the legitimate
 		// trailing "&roles.0=client" param should appear as a real querystring key.
 		expect(url.match(/(?:^|&)roles\.0=[^&]*/g)).toEqual(['&roles.0=client']);
-	});
-
-	it('clients.bookPage tells the agent to output TOTAL=0 when the table is empty', () => {
-		const op = PLAYBOOK['clients.bookPage'];
-		expect(op.extract.join(' ')).toMatch(/TOTAL=0/);
 	});
 
 	it('briefing.gather outputSpec documents the DD/MM/YYYY -> YYYY-MM-DD conversion', () => {
