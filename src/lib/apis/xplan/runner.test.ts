@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runOperation, XplanNotLoggedInError, XplanCancelledError } from './index';
+import { runOperation, XplanNotLoggedInError, XplanCancelledError, gatherXplanClientBook } from './index';
 import type { XplanOperation } from './playbook';
 
 const op: XplanOperation = {
@@ -61,5 +61,22 @@ describe('runOperation', () => {
 		await expect(
 			runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch, ac.signal)
 		).rejects.toBeInstanceOf(XplanCancelledError);
+	});
+});
+
+describe('gatherXplanClientBook', () => {
+	const okBody = (obj: unknown) =>
+		({ ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify(obj) } }] }) }) as unknown as Response;
+	it('returns the parsed sweep result and passes navigateFirst/pages into the prompt', async () => {
+		const fetchFn = vi.fn(async () => okBody({ total: 757, reachedEnd: false, rows: [{ name: 'A, B', id: '1' }] }));
+		const r = await gatherXplanClientBook('tok', { navigateFirst: true, pages: 3 }, 150_000, undefined, fetchFn as unknown as typeof fetch);
+		expect(r).toEqual({ total: 757, reachedEnd: false, rows: [{ name: 'A, B', id: '1' }] });
+		const body = JSON.parse(String((fetchFn.mock.calls[0] as any)[1].body));
+		expect(body.messages[0].content).toContain('browser_navigate once to');
+	});
+	it('returns NOT_LOGGED_IN sentinel', async () => {
+		const fetchFn = vi.fn(async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: 'NOT_LOGGED_IN' } }] }) }) as unknown as Response);
+		const r = await gatherXplanClientBook('tok', { navigateFirst: false, pages: 3 }, 150_000, undefined, fetchFn as unknown as typeof fetch);
+		expect(r).toBe('NOT_LOGGED_IN');
 	});
 });
