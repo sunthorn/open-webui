@@ -10,6 +10,7 @@ import {
 	parseBookSweep,
 	type BookSweepResult
 } from './playbook';
+import { buildPrompt } from './prompt';
 
 // clients.search now reads XPLAN's internal /resourceful/entity JSON resource
 // (recon: docs/xplan-playbook/02-client-search.md) — rows look like
@@ -280,5 +281,26 @@ describe('PLAYBOOK client.* entries', () => {
 		expect(url).toBe('https://sparkfg.xplan.iress.com.au/factfind/view/999999?role=client&page=super');
 		expect(op.outputFormat).toBe('lines');
 		expect(op.outputSpec).toMatch(/NONE/);
+	});
+});
+
+describe('clients.bookSweep catalog op', () => {
+	it('clients.bookSweep navigates only on the first batch, pages otherwise', () => {
+		const op = PLAYBOOK['clients.bookSweep'];
+		const urlFn = op.url as (p: Record<string, string>) => string;
+		expect(urlFn({ navigateFirst: 'true' })).toBe('https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client');
+		expect(urlFn({ navigateFirst: 'false' })).toBe('');
+		expect(op.paging).toBe(true);
+		expect(op.parse).toBe(parseBookSweep);
+	});
+	it('clients.bookSweep prompt: first batch navigates + clicks Next; continuation does not navigate', () => {
+		const op = PLAYBOOK['clients.bookSweep'];
+		const first = buildPrompt(op, { navigateFirst: 'true', pages: '3' });
+		expect(first).toContain('browser_navigate once to');
+		expect(first).toMatch(/Next/);
+		expect(first).toMatch(/3 pages/);
+		const more = buildPrompt(op, { navigateFirst: 'false', pages: '3' });
+		expect(more).toMatch(/do NOT navigate/i);
+		expect(more).toMatch(/Next/);
 	});
 });

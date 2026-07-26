@@ -349,5 +349,30 @@ export const PLAYBOOK: Record<string, XplanOperation> = {
 		outputSpec:
 			'one line per super/pension holding: fundName|member|balance|type (cells joined with |). If the page shows none, output exactly: NONE (column order is recon\'s best-effort estimate pending Task 13 live verification — read the actual table headers if they differ)',
 		parse: parsePipeTable
+	},
+	'clients.bookSweep': {
+		id: 'clients.bookSweep',
+		title: 'Sweep a batch of the client book from one search',
+		reconDoc: 'docs/superpowers/specs/2026-07-26-book-sweep-design.md',
+		// navigateFirst==='true' → navigate once (starts the single search);
+		// otherwise return '' so buildPrompt emits the do-NOT-navigate opening and
+		// the agent keeps paging the SAME search (avoids XPLAN's one-search modal).
+		url: (p) =>
+			p.navigateFirst === 'true' ? `${BASE}/factfind/search/result?role=client` : '',
+		paging: true,
+		navHints: [
+			'read the current results page, then advance by clicking the "Next" control at the bottom of the results table and waiting for the table to reload',
+			'repeat read-then-Next for up to {pages} pages total, or stop early if the Next control is absent or disabled (that means the last page was reached)',
+			'do NOT touch the search filter form and do NOT re-run the search — only click Next'
+		],
+		extract: [
+			'for every client row on each page you read: the name and the entity id',
+			'the "N to M of TOTAL" range shown above the results table (for TOTAL and to tell when the last page is reached)'
+		],
+		outputFormat: 'json',
+		outputSpec:
+			'ONE JSON object: {"total": <the number after "of", or 0 if not shown>, "reachedEnd": <true if you reached the last page — Next absent/disabled or M>=TOTAL — else false>, "rows": [{"name":"Surname, First","id":"<entity id>"}, ...]} covering EVERY row on the pages you read this batch. If no rows are shown: {"total":0,"reachedEnd":true,"rows":[]}',
+		parse: parseBookSweep,
+		timeoutMs: 150_000
 	}
 };
