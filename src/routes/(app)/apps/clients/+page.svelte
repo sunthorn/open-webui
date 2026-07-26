@@ -9,7 +9,7 @@
 	import { getBriefing, getOutput, putOutput } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
-	import { gatherXplanClientPage, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
+	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
 
 	let query = '';
 	let attention: string[] = [];
@@ -82,8 +82,9 @@
 	//    of discarding the whole run (the old behaviour on a single timeout);
 	//  • progress is persisted after every page; a resume seeds from the saved
 	//    book so nothing already synced is lost or needlessly re-read.
-	const MAX_PAGES = 30;
-	const PAGE_TIMEOUT_MS = 180_000; // ~100-row table reads are slow — give each room
+	const PAGES_PER_BATCH = 3;
+	const MAX_BATCHES = 12; // 12 × 3 = 36 pages — well past 757/100=8, a safety cap
+	const BATCH_TIMEOUT_MS = 150_000;
 
 	const persistBook = async (m: Map<string, XplanClient>, next: number) => {
 		book = Array.from(m.values());
@@ -102,51 +103,59 @@
 		syncErr = '';
 		syncController = new AbortController();
 		const signal = syncController.signal;
-		// Resume a stopped sweep (seed from the saved book, start at the cursor);
-		// otherwise start a fresh full sync from page 1.
+		// Resume seeds from the saved book (never shrink); a fresh sync starts empty.
 		const resuming = bookNextPage > 1;
 		const map = new Map<string, XplanClient>(
 			resuming ? book.map((c) => [c.id || c.name.toLowerCase(), c] as [string, XplanClient]) : []
 		);
-		const start = resuming ? bookNextPage : 1;
+		let navigateFirst = !resuming; // first batch of a fresh sync navigates (one search)
+		let reanchored = !resuming; // a resume may re-navigate ONCE if the tab drifted off results
 		let total = 0;
-		syncProgress = resuming ? `Resuming at page ${start}…` : 'Starting…';
+		let noNewStreak = 0;
+		syncProgress = resuming ? 'Resuming…' : 'Starting…';
 		try {
-			for (let page = start; page <= MAX_PAGES; page++) {
+			for (let batch = 0; batch < MAX_BATCHES; batch++) {
 				if (signal.aborted) {
-					await persistBook(map, page); // resume here on next Sync
+					await persistBook(map, 2);
 					syncErr = `Stopped — ${map.size}${total ? ` of ${total}` : ''} synced. Click Resume sync to continue.`;
 					break;
 				}
-				syncProgress = `Reading page ${page}${total ? ` · ${map.size} of ${total}` : ` · ${map.size} so far`}…`;
-				// Retry a slow/failed page once before giving up on it.
-				let res: Awaited<ReturnType<typeof gatherXplanClientPage>> | null = null;
+				syncProgress = `Reading${total ? ` · ${map.size} of ${total}` : ` · ${map.size} so far`}…`;
+				let res: Awaited<ReturnType<typeof gatherXplanClientBook>> | null = null;
 				let cancelled = false;
 				for (let attempt = 1; attempt <= 2 && res === null; attempt++) {
 					try {
-						res = await gatherXplanClientPage(token(), page, PAGE_TIMEOUT_MS, signal);
+						res = await gatherXplanClientBook(token(), { navigateFirst, pages: PAGES_PER_BATCH }, BATCH_TIMEOUT_MS, signal);
 					} catch (e) {
-						if (e instanceof XplanCancelledError) {
-							cancelled = true;
-							break;
-						}
+						if (e instanceof XplanCancelledError) { cancelled = true; break; }
 						res = null;
 					}
 				}
 				if (cancelled) {
-					await persistBook(map, page); // resume here on next Sync
+					await persistBook(map, 2);
 					syncErr = `Stopped — ${map.size}${total ? ` of ${total}` : ''} synced. Click Resume sync to continue.`;
 					break;
 				}
 				if (res === null) {
-					// Failed twice — stop, but stay resumable at THIS page.
-					await persistBook(map, page);
-					syncErr = `Page ${page} didn’t load — ${map.size}${total ? ` of ${total}` : ''} synced. Click Sync to resume from here.`;
+					await persistBook(map, 2);
+					syncErr = `A batch didn’t load — ${map.size}${total ? ` of ${total}` : ''} synced. Click Sync to resume.`;
 					break;
 				}
 				if (res === 'NOT_LOGGED_IN') {
-					if (map.size === 0)
-						syncErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then sync.';
+					if (map.size === 0) syncErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then sync.';
+					break;
+				}
+				// A resume whose continuation batch returns nothing means the tab
+				// drifted off the results page. Re-anchor the search ONCE (navigate
+				// next batch); dedupe-by-id absorbs the re-read overlap.
+				if (!reanchored && res.rows.length === 0 && !res.reachedEnd) {
+					navigateFirst = true;
+					reanchored = true;
+					continue;
+				}
+				// First batch failed to anchor (navigated but empty) — filter guard.
+				if (navigateFirst && res.total === 0 && res.rows.length === 0) {
+					syncErr = 'XPLAN returned an empty book — check the results filter is set to All Users, then sync again.';
 					break;
 				}
 				if (res.total) total = res.total;
@@ -156,13 +165,17 @@
 					if (!map.has(k)) map.set(k, c);
 				}
 				const added = map.size - before;
-				const done = res.rows.length === 0 || (!!total && map.size >= total);
-				// nextPage: 1 when complete (next Sync is a fresh refresh), else advance.
-				await persistBook(map, done ? 1 : page + 1);
+				const done = res.reachedEnd || (!!total && map.size >= total);
+				await persistBook(map, done ? 1 : 2);
+				navigateFirst = false; // every subsequent batch pages the same search
 				if (done) break;
 				if (added === 0) {
-					syncErr = `Sync paused at page ${page} — no new clients returned (${map.size}${total ? ` of ${total}` : ''}). Likely the end; click Sync to try again.`;
-					break;
+					if (++noNewStreak >= 2) {
+						syncErr = `Sync paused — no new clients returned (${map.size}${total ? ` of ${total}` : ''}). Click Sync to try again.`;
+						break;
+					}
+				} else {
+					noNewStreak = 0;
 				}
 			}
 		} catch (e: any) {
