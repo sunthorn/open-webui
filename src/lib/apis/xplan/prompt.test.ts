@@ -32,10 +32,14 @@ describe('buildPrompt', () => {
 		expect(prompt).toContain('browser_navigate once');
 	});
 	it('injects forbidden tools + no-loop rails', () => {
-		expect(prompt).toContain('browser_cdp');
+		expect(prompt).toContain('browser_console'); // fragile JS reads + a write risk — forbidden
 		expect(prompt).toContain('execute_code');
-		expect(prompt).toContain('browser_snapshot');
+		expect(prompt).toContain('browser_cdp');
 		expect(prompt).toContain('Do not loop');
+	});
+	it('steers reads to browser_snapshot, not JavaScript', () => {
+		expect(prompt).toContain('browser_snapshot');
+		expect(prompt).toMatch(/Do NOT write or run JavaScript/i);
 	});
 	it('injects the NOT_LOGGED_IN sentinel', () => {
 		expect(prompt).toContain('NOT_LOGGED_IN');
