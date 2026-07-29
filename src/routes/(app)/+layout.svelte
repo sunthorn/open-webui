@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { onMount, tick, getContext } from 'svelte';
+	import { onMount, onDestroy, tick, getContext } from 'svelte';
 	import { openDB, deleteDB } from 'idb';
 	import fileSaver from 'file-saver';
 	const { saveAs } = fileSaver;
@@ -14,6 +14,7 @@
 	import { getBanners } from '$lib/apis/configs';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
+	import { sendXplanHeartbeat } from '$lib/apis/gateway';
 
 	import { WEBUI_VERSION, WEBUI_API_BASE_URL } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -374,6 +375,22 @@
 			};
 		});
 	};
+
+	// --- Debug-Chrome heartbeat ------------------------------------------------
+	// While the axi app is open (any page), beat every 30s so the host caretaker
+	// keeps the debug Chrome alive. Fire-and-forget: sendXplanHeartbeat never
+	// throws. Stops when the app closes → caretaker stops holding the browser.
+	const HEARTBEAT_MS = 30_000;
+	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+	onMount(() => {
+		sendXplanHeartbeat(localStorage.token); // first beat immediately
+		heartbeatTimer = setInterval(() => sendXplanHeartbeat(localStorage.token), HEARTBEAT_MS);
+	});
+
+	onDestroy(() => {
+		if (heartbeatTimer) clearInterval(heartbeatTimer);
+	});
 </script>
 
 <SettingsModal bind:show={$showSettings} />

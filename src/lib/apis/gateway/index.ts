@@ -193,3 +193,35 @@ export const setGuardrail = async (token: string, locked: boolean): Promise<bool
 	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
 	return !!(await res.json()).locked;
 };
+
+// --- Debug-Chrome caretaker (keep alive / reopen) -------------------------
+// A host-side watcher keeps the debug Chrome alive WHILE axi is open. The app
+// sends a heartbeat every ~30s (fire-and-forget); the "Reopen" button asks the
+// caretaker to force-restart the debug Chrome. PUT to match the gateway's CORS
+// method allowlist.
+
+/** Tell the caretaker "axi is open, keep the debug Chrome alive". Never throws —
+ *  a missing caretaker is not a UI error; the connection badge speaks for itself. */
+export const sendXplanHeartbeat = async (token: string): Promise<void> => {
+	try {
+		await fetch(`${gatewayUrl()}/gw/xplan/heartbeat`, {
+			method: 'PUT',
+			headers: { Authorization: `Bearer ${token}` }
+		});
+	} catch {
+		/* offline / caretaker down — ignore; the badge reflects reality */
+	}
+};
+
+/** Force the caretaker to reopen the debug Chrome (the in-app backup button).
+ *  Throws with a readable message if the caretaker isn't installed/reachable. */
+export const relaunchDebugBrowser = async (token: string): Promise<void> => {
+	const res = await fetch(`${gatewayUrl()}/gw/xplan/relaunch`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+};

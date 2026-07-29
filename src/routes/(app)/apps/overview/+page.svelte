@@ -4,7 +4,7 @@
 	// read onto one page.
 	//   • Check connection — FREE (gateway probes the debug Chrome, no LLM).
 	//   • Refresh briefing / Sync dashboard — spend tokens; explicit, ~1–2×/day.
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import {
 		syncXplanOverview,
 		gatherXplanBriefing,
@@ -17,6 +17,7 @@
 		getGuardrail,
 		setGuardrail,
 		getXplanStatus,
+		relaunchDebugBrowser,
 		getBriefing,
 		saveBriefing,
 		type DailyBriefing,
@@ -36,14 +37,48 @@
 	let guardrailLocked = true;
 	let guardrailBusy = false;
 
+	// Reopen (host caretaker force-restarts the debug Chrome) — the backup for
+	// when the browser is fully gone and the heartbeat keep-alive hasn't caught it.
+	let reopening = false;
+	let reopenErr = '';
+
 	$: step1 = !probed ? 'unknown' : browserUp ? 'ok' : 'todo';
 	$: step2 = loggedIn === true ? 'ok' : loggedIn === false ? 'fail' : 'unknown';
 	$: step3 = guardrailLocked ? 'todo' : 'ok';
-	// Ready to work when the browser is up and access is unlocked. We DON'T require
-	// an already-open signed-in XPLAN tab (loggedIn may be null): the Refresh/Sync
-	// actions navigate to XPLAN themselves and bounce back here (loggedIn=false)
-	// only if the session really isn't authenticated.
-	$: connected = browserUp && loggedIn !== false && !guardrailLocked;
+	// Honest green: browser up AND a signed-in XPLAN tab AND access unlocked. A
+	// null loggedIn ("can't tell") is deliberately NOT green — the badge tells the
+	// planner to sign in rather than falsely claiming connected.
+	$: connected = browserUp && loggedIn === true && !guardrailLocked;
+	// The Sync/Refresh actions can be attempted whenever the browser is up, access
+	// is unlocked, and we're not known-logged-out (loggedIn may be null: the
+	// actions navigate to XPLAN themselves and surface NOT_LOGGED_IN if needed).
+	// This mirrors the previous "connected" gate so the working sync flow is
+	// unchanged — the honest green badge above is now a separate concept.
+	$: canSync = browserUp && loggedIn !== false && !guardrailLocked;
+	// Five-state badge for the header (honest; never a stale "connected").
+	$: connState = !probed
+		? 'checking'
+		: !browserUp
+			? 'browser-down'
+			: loggedIn !== true
+				? 'signin'
+				: guardrailLocked
+					? 'locked'
+					: 'connected';
+	$: connLabel = {
+		checking: 'Checking…',
+		'browser-down': 'Debug browser not running',
+		signin: 'Sign in to XPLAN',
+		locked: 'Turn on XPLAN access',
+		connected: 'Connected'
+	}[connState];
+	$: connDot = {
+		checking: 'bg-gray-400',
+		'browser-down': 'bg-red-500',
+		signin: 'bg-amber-500',
+		locked: 'bg-amber-500',
+		connected: 'bg-green-500'
+	}[connState];
 
 	// --- briefing (live) ---
 	let briefing: DailyBriefing | null = null;
@@ -104,6 +139,33 @@
 		}
 	};
 
+	// Ask the host caretaker to force-restart the debug Chrome, then poll status
+	// until it comes up. Backup for when the browser is fully gone.
+	const reopen = async () => {
+		if (reopening) return;
+		reopening = true;
+		reopenErr = '';
+		try {
+			await relaunchDebugBrowser(token());
+			// Poll for the browser to come back (caretaker relaunch takes a few s).
+			for (let i = 0; i < 8 && !browserUp; i++) {
+				await new Promise((r) => setTimeout(r, 1500));
+				await checkConnection();
+			}
+		} catch (e: any) {
+			reopenErr = typeof e === 'string' ? e : (e?.message ?? 'Could not reopen the debug browser');
+		} finally {
+			reopening = false;
+		}
+	};
+
+	// Auto-recheck so the badge stays honest without a manual click: every 30s,
+	// and immediately when the planner returns to the tab/window.
+	let recheckTimer: ReturnType<typeof setInterval> | null = null;
+	const onFocus = () => {
+		if (document.visibilityState === 'visible') checkConnection();
+	};
+
 	onMount(async () => {
 		const now = new Date();
 		const h = now.getHours();
@@ -128,6 +190,17 @@
 		}
 
 		await checkConnection();
+
+		// Keep the badge honest: poll every 30s and on tab focus.
+		recheckTimer = setInterval(checkConnection, 30_000);
+		document.addEventListener('visibilitychange', onFocus);
+		window.addEventListener('focus', onFocus);
+	});
+
+	onDestroy(() => {
+		if (recheckTimer) clearInterval(recheckTimer);
+		document.removeEventListener('visibilitychange', onFocus);
+		window.removeEventListener('focus', onFocus);
 	});
 
 	const toggleGuardrail = async () => {
@@ -215,21 +288,27 @@
 			<h1 class="text-2xl font-semibold tracking-tight">{greeting}</h1>
 			<p class="text-sm text-gray-500 mt-1">{today} · Today's overview</p>
 		</div>
-		{#if !connected}
+		<!-- Always-visible, honest connection badge + manual re-check -->
+		<div class="shrink-0 flex items-center gap-2">
+			<span
+				class="inline-flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-full
+					border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
+				title="Auto-checks every 30s and when you return to this tab"
+			>
+				<span class="size-2 rounded-full {connDot} {checking ? 'animate-pulse' : ''}"></span>
+				{connLabel}
+			</span>
 			<button
 				on:click={checkConnection}
 				disabled={checking}
-				class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl
+				aria-label="Re-check connection"
+				title="Re-check now"
+				class="shrink-0 inline-flex items-center justify-center size-8 rounded-lg
 					border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
 			>
-				{#if checking}
-					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-					Checking…
-				{:else}
-					Check connection
-				{/if}
+				<svg class="size-4 {checking ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
 			</button>
-		{/if}
+		</div>
 	</div>
 
 	<!-- Connect checklist — until connected -->
@@ -247,12 +326,28 @@
 						{step1 === 'ok' ? '✓' : '1'}
 					</span>
 					<div class="min-w-0">
-						<p class="text-sm font-medium">Start the debug browser</p>
+						<p class="text-sm font-medium">Debug browser</p>
 						{#if step1 !== 'ok'}
-							<p class="text-xs text-gray-500 mt-0.5">Run this once in your terminal, from the project folder:</p>
-							<code class="mt-1.5 block text-xs bg-gray-100 dark:bg-gray-850 rounded-lg px-3 py-2 select-all">./scripts/start-xplan-chrome.sh</code>
-							{#if step1 === 'todo' && probed}
-								<p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">Not detected yet — start it, then Check connection.</p>
+							<p class="text-xs text-gray-500 mt-0.5">
+								It normally stays open on its own. If it's closed, reopen it here — no terminal needed.
+							</p>
+							<button
+								on:click={reopen}
+								disabled={reopening}
+								class="mt-2 inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-lg
+									border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
+							>
+								{#if reopening}
+									<svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+									Reopening…
+								{:else}
+									Reopen debug browser
+								{/if}
+							</button>
+							{#if reopenErr}
+								<p class="text-xs text-red-600 dark:text-red-400 mt-1.5">{reopenErr}</p>
+							{:else if step1 === 'todo' && probed && !reopening}
+								<p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">Not detected yet — reopen it, then it'll turn green.</p>
 							{/if}
 						{/if}
 					</div>
@@ -302,8 +397,8 @@
 		</div>
 	{/if}
 
-	<!-- Dashboard read — shown when connected or we have a saved read -->
-	{#if connected || lines.length}
+	<!-- Dashboard read — shown when we can sync or we have a saved read -->
+	{#if canSync || lines.length}
 		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6 mb-5">
 			<div class="flex items-center justify-between mb-3">
 				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Dashboard read</h2>
@@ -318,7 +413,7 @@
 							Stop
 						</button>
 					{/if}
-					{#if connected}
+					{#if canSync}
 						<button
 							on:click={syncDashboard}
 							disabled={syncState === 'loading'}
@@ -351,8 +446,8 @@
 		</div>
 	{/if}
 
-	<!-- Briefing agenda — shown when connected or we have a saved one -->
-	{#if connected || !briefingEmpty}
+	<!-- Briefing agenda — shown when we can sync or we have a saved one -->
+	{#if canSync || !briefingEmpty}
 		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6">
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Today's briefing</h2>
@@ -369,7 +464,7 @@
 							Stop
 						</button>
 					{/if}
-					{#if connected}
+					{#if canSync}
 						<button
 							on:click={refreshBriefing}
 							disabled={briefingState === 'loading'}
