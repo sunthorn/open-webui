@@ -225,3 +225,32 @@ export const relaunchDebugBrowser = async (token: string): Promise<void> => {
 		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
 	}
 };
+
+// --- XPLAN access tiers (Lock / Read-only / Full) -------------------------
+export type XplanAccessLevel = 'lock' | 'readonly' | 'full';
+
+/** Pure tier → display mapping (unit-testable; used by the chip + overview). */
+export const accessMeta = (level: XplanAccessLevel) =>
+	({
+		lock: { icon: '🔒', label: 'Lock', isLock: true, canWrite: false },
+		readonly: { icon: '👁', label: 'Read-only', isLock: false, canWrite: false },
+		full: { icon: '✍️', label: 'Full', isLock: false, canWrite: true }
+	})[level];
+
+export const getXplanAccess = async (token: string): Promise<XplanAccessLevel> => {
+	const res = await fetch(`${gatewayUrl()}/gw/xplan/access`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
+	return (await res.json()).level as XplanAccessLevel;
+};
+
+export const setXplanAccess = async (token: string, level: XplanAccessLevel): Promise<XplanAccessLevel> => {
+	const res = await fetch(`${gatewayUrl()}/gw/xplan/access`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ level })
+	});
+	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
+	return (await res.json()).level as XplanAccessLevel;
+};

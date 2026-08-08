@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runOperation, XplanNotLoggedInError, XplanCancelledError, gatherXplanClientBook } from './index';
+import { runOperation, XplanNotLoggedInError, XplanCancelledError, XplanReadOnlyError, gatherXplanClientBook } from './index';
 import type { XplanOperation } from './playbook';
+
+const writeOp: XplanOperation = {
+	id: 'test.write', title: 'W', reconDoc: 'x', url: 'https://example.invalid/w',
+	extract: ['x'], outputFormat: 'text', outputSpec: 'text',
+	parse: (raw) => ({ raw }), write: true
+};
 
 const op: XplanOperation = {
 	id: 'test.op', title: 'T', reconDoc: 'x', url: 'https://example.invalid/p',
@@ -78,5 +84,29 @@ describe('gatherXplanClientBook', () => {
 		const fetchFn = vi.fn(async () => ({ ok: true, json: async () => ({ choices: [{ message: { content: 'NOT_LOGGED_IN' } }] }) }) as unknown as Response);
 		const r = await gatherXplanClientBook('tok', { navigateFirst: false, pages: 3 }, 150_000, undefined, fetchFn as unknown as typeof fetch);
 		expect(r).toBe('NOT_LOGGED_IN');
+	});
+});
+
+describe('runOperation write-gate', () => {
+	it('throws XplanReadOnlyError for a write op unless access is full', async () => {
+		const fetchFn = vi.fn(async () => okResponse('x'));
+		await expect(runOperation(writeOp, 'tok', {}, fetchFn as unknown as typeof fetch, undefined, 'readonly'))
+			.rejects.toBeInstanceOf(XplanReadOnlyError);
+		expect(fetchFn).not.toHaveBeenCalled(); // gate is BEFORE any hermes call
+	});
+	it('blocks a write op when access level is omitted (safe default)', async () => {
+		const fetchFn = vi.fn(async () => okResponse('x'));
+		await expect(runOperation(writeOp, 'tok', {}, fetchFn as unknown as typeof fetch))
+			.rejects.toBeInstanceOf(XplanReadOnlyError);
+	});
+	it('allows a write op when access is full', async () => {
+		const fetchFn = vi.fn(async () => okResponse('ok'));
+		const out = await runOperation<{ raw: string }>(writeOp, 'tok', {}, fetchFn as unknown as typeof fetch, undefined, 'full');
+		expect(out).toEqual({ raw: 'ok' });
+	});
+	it('does not gate a read op in readonly', async () => {
+		const fetchFn = vi.fn(async () => okResponse('r'));
+		const out = await runOperation<{ raw: string }>(op, 'tok', {}, fetchFn as unknown as typeof fetch, undefined, 'readonly');
+		expect(out).toEqual({ raw: 'r' });
 	});
 });

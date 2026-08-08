@@ -14,12 +14,11 @@
 	import {
 		getOverviewSnapshot,
 		saveOverviewSnapshot,
-		getGuardrail,
-		setGuardrail,
+		getXplanAccess,
 		getXplanStatus,
-		relaunchDebugBrowser,
 		getBriefing,
 		saveBriefing,
+		type XplanAccessLevel,
 		type DailyBriefing,
 		type BriefingItem
 	} from '$lib/apis/gateway';
@@ -30,55 +29,18 @@
 	const token = () => localStorage.getItem('token') ?? '';
 
 	// --- connection (free probe) ---
-	let checking = false;
 	let probed = false;
 	let browserUp = false;
 	let loggedIn: boolean | null = null;
-	let guardrailLocked = true;
-	let guardrailBusy = false;
+	let accessLevel: XplanAccessLevel = 'lock';
+	// Derived alias kept so canSync below reads clearly.
+	$: guardrailLocked = accessLevel === 'lock';
 
-	// Reopen (host caretaker force-restarts the debug Chrome) — the backup for
-	// when the browser is fully gone and the heartbeat keep-alive hasn't caught it.
-	let reopening = false;
-	let reopenErr = '';
-
-	$: step1 = !probed ? 'unknown' : browserUp ? 'ok' : 'todo';
-	$: step2 = loggedIn === true ? 'ok' : loggedIn === false ? 'fail' : 'unknown';
-	$: step3 = guardrailLocked ? 'todo' : 'ok';
-	// Honest green: browser up AND a signed-in XPLAN tab AND access unlocked. A
-	// null loggedIn ("can't tell") is deliberately NOT green — the badge tells the
-	// planner to sign in rather than falsely claiming connected.
-	$: connected = browserUp && loggedIn === true && !guardrailLocked;
 	// The Sync/Refresh actions can be attempted whenever the browser is up, access
 	// is unlocked, and we're not known-logged-out (loggedIn may be null: the
 	// actions navigate to XPLAN themselves and surface NOT_LOGGED_IN if needed).
-	// This mirrors the previous "connected" gate so the working sync flow is
-	// unchanged — the honest green badge above is now a separate concept.
+	// Connection state itself is shown by the top-bar status pill.
 	$: canSync = browserUp && loggedIn !== false && !guardrailLocked;
-	// Five-state badge for the header (honest; never a stale "connected").
-	$: connState = !probed
-		? 'checking'
-		: !browserUp
-			? 'browser-down'
-			: loggedIn !== true
-				? 'signin'
-				: guardrailLocked
-					? 'locked'
-					: 'connected';
-	$: connLabel = {
-		checking: 'Checking…',
-		'browser-down': 'Debug browser not running',
-		signin: 'Sign in to XPLAN',
-		locked: 'Turn on XPLAN access',
-		connected: 'Connected'
-	}[connState];
-	$: connDot = {
-		checking: 'bg-gray-400',
-		'browser-down': 'bg-red-500',
-		signin: 'bg-amber-500',
-		locked: 'bg-amber-500',
-		connected: 'bg-green-500'
-	}[connState];
 
 	// --- briefing (live) ---
 	let briefing: DailyBriefing | null = null;
@@ -124,38 +86,16 @@
 					: 'bg-gray-400';
 
 	const checkConnection = async () => {
-		checking = true;
 		try {
-			const [status, locked] = await Promise.all([
+			const [status, lvl] = await Promise.all([
 				getXplanStatus(token()).catch(() => ({ browserUp: false, loggedIn: null }) as any),
-				getGuardrail(token()).catch(() => guardrailLocked)
+				getXplanAccess(token()).catch(() => accessLevel)
 			]);
 			browserUp = !!status.browserUp;
 			loggedIn = status.loggedIn;
-			guardrailLocked = locked;
+			accessLevel = lvl;
 		} finally {
 			probed = true;
-			checking = false;
-		}
-	};
-
-	// Ask the host caretaker to force-restart the debug Chrome, then poll status
-	// until it comes up. Backup for when the browser is fully gone.
-	const reopen = async () => {
-		if (reopening) return;
-		reopening = true;
-		reopenErr = '';
-		try {
-			await relaunchDebugBrowser(token());
-			// Poll for the browser to come back (caretaker relaunch takes a few s).
-			for (let i = 0; i < 8 && !browserUp; i++) {
-				await new Promise((r) => setTimeout(r, 1500));
-				await checkConnection();
-			}
-		} catch (e: any) {
-			reopenErr = typeof e === 'string' ? e : (e?.message ?? 'Could not reopen the debug browser');
-		} finally {
-			reopening = false;
 		}
 	};
 
@@ -202,18 +142,6 @@
 		document.removeEventListener('visibilitychange', onFocus);
 		window.removeEventListener('focus', onFocus);
 	});
-
-	const toggleGuardrail = async () => {
-		if (guardrailBusy) return;
-		guardrailBusy = true;
-		try {
-			guardrailLocked = await setGuardrail(token(), !guardrailLocked);
-		} catch (e) {
-			console.warn('Could not change guardrail:', e);
-		} finally {
-			guardrailBusy = false;
-		}
-	};
 
 	// SPENDS TOKENS — live-read today's tasks/diary and rebuild the briefing.
 	const refreshBriefing = async () => {
@@ -288,114 +216,12 @@
 			<h1 class="text-2xl font-semibold tracking-tight">{greeting}</h1>
 			<p class="text-sm text-gray-500 mt-1">{today} · Today's overview</p>
 		</div>
-		<!-- Always-visible, honest connection badge + manual re-check -->
-		<div class="shrink-0 flex items-center gap-2">
-			<span
-				class="inline-flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-full
-					border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900"
-				title="Auto-checks every 30s and when you return to this tab"
-			>
-				<span class="size-2 rounded-full {connDot} {checking ? 'animate-pulse' : ''}"></span>
-				{connLabel}
-			</span>
-			<button
-				on:click={checkConnection}
-				disabled={checking}
-				aria-label="Re-check connection"
-				title="Re-check now"
-				class="shrink-0 inline-flex items-center justify-center size-8 rounded-lg
-					border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
-			>
-				<svg class="size-4 {checking ? 'animate-spin' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
-			</button>
-		</div>
+		<!-- Connection + access now live in the top-bar status pill (global), so no
+		     duplicate badge here. -->
 	</div>
 
-	<!-- Connect checklist — until connected -->
-	{#if !connected}
-		<div class="rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 mb-5">
-			<h2 class="text-base font-semibold">Connect to XPLAN</h2>
-			<p class="text-sm text-gray-500 mt-1 mb-4">
-				Three quick steps, then you can refresh today's agenda. Checking the connection is free —
-				only refreshing uses the AI.
-			</p>
-			<ol class="space-y-4">
-				<li class="flex gap-3">
-					<span class="mt-0.5 shrink-0 size-5 rounded-full flex items-center justify-center text-[11px] font-semibold
-						{step1 === 'ok' ? 'bg-green-500 text-white' : step1 === 'todo' ? 'bg-amber-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}">
-						{step1 === 'ok' ? '✓' : '1'}
-					</span>
-					<div class="min-w-0">
-						<p class="text-sm font-medium">Debug browser</p>
-						{#if step1 !== 'ok'}
-							<p class="text-xs text-gray-500 mt-0.5">
-								It normally stays open on its own. If it's closed, reopen it here — no terminal needed.
-							</p>
-							<button
-								on:click={reopen}
-								disabled={reopening}
-								class="mt-2 inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-lg
-									border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
-							>
-								{#if reopening}
-									<svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-									Reopening…
-								{:else}
-									Reopen debug browser
-								{/if}
-							</button>
-							{#if reopenErr}
-								<p class="text-xs text-red-600 dark:text-red-400 mt-1.5">{reopenErr}</p>
-							{:else if step1 === 'todo' && probed && !reopening}
-								<p class="text-xs text-amber-600 dark:text-amber-400 mt-1.5">Not detected yet — reopen it, then it'll turn green.</p>
-							{/if}
-						{/if}
-					</div>
-				</li>
-				<li class="flex gap-3">
-					<span class="mt-0.5 shrink-0 size-5 rounded-full flex items-center justify-center text-[11px] font-semibold
-						{step2 === 'ok' ? 'bg-green-500 text-white' : step2 === 'fail' ? 'bg-amber-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}">
-						{step2 === 'ok' ? '✓' : '2'}
-					</span>
-					<div class="min-w-0">
-						<p class="text-sm font-medium">Sign in to XPLAN</p>
-						<p class="text-xs text-gray-500 mt-0.5">
-							{#if step2 === 'fail'}
-								The browser is up but not on a signed-in XPLAN page — log in in that window.
-							{:else if step1 === 'ok' && step2 === 'unknown'}
-								Open XPLAN in the debug window and sign in (no XPLAN tab detected yet).
-							{:else}
-								In the window that opens, sign in to XPLAN as usual — your session stays there.
-							{/if}
-						</p>
-					</div>
-				</li>
-				<li class="flex gap-3 items-start">
-					<span class="mt-0.5 shrink-0 size-5 rounded-full flex items-center justify-center text-[11px] font-semibold
-						{step3 === 'ok' ? 'bg-green-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}">
-						{step3 === 'ok' ? '✓' : '3'}
-					</span>
-					<div class="flex-1 flex items-start justify-between gap-4">
-						<div class="min-w-0">
-							<p class="text-sm font-medium">Allow XPLAN access</p>
-							<p class="text-xs text-gray-500 mt-0.5">Lets the agent use the browser. Turn off when you're done.</p>
-						</div>
-						<button
-							role="switch"
-							aria-checked={!guardrailLocked}
-							aria-label="XPLAN access"
-							disabled={guardrailBusy}
-							on:click={toggleGuardrail}
-							class="relative shrink-0 mt-0.5 w-11 h-6 rounded-full transition disabled:opacity-50
-								{!guardrailLocked ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-700'}"
-						>
-							<span class="absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform {!guardrailLocked ? 'translate-x-5' : 'translate-x-0'}"></span>
-						</button>
-					</div>
-				</li>
-			</ol>
-		</div>
-	{/if}
+	<!-- The Connect-to-XPLAN checklist now lives in the top-bar status pill's
+	     popover, so it is reachable from every page instead of only here. -->
 
 	<!-- Dashboard read — shown when we can sync or we have a saved read -->
 	{#if canSync || lines.length}

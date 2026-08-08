@@ -48,6 +48,7 @@
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
 
 	const i18n = getContext('i18n');
@@ -376,22 +377,43 @@
 		});
 	};
 
-	// --- Debug-Chrome heartbeat ------------------------------------------------
-	// While the axi app is open (any page), beat every 30s so the host caretaker
-	// keeps the debug Chrome alive. Fire-and-forget: sendXplanHeartbeat never
-	// throws. Stops when the app closes → caretaker stops holding the browser.
+	// --- Debug-Chrome heartbeat (XPLAN pages only) -----------------------------
+	// Beat ONLY while the planner is on an XPLAN page — the routes that actually
+	// use the debug Chrome. The host caretaker keeps the browser alive only while
+	// these beats arrive, so it opens exactly when needed and leaves the Mac alone
+	// on every other page. Fire-and-forget: sendXplanHeartbeat never throws.
+	// (If you add a new page that reads XPLAN, add its route prefix here.)
 	const HEARTBEAT_MS = 30_000;
+	const XPLAN_ROUTES = ['/apps/overview', '/apps/briefing', '/apps/clients'];
+	const onXplanPage = (path: string) => XPLAN_ROUTES.some((r) => path.startsWith(r));
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+	let wasOnXplan = false;
 
 	onMount(() => {
-		sendXplanHeartbeat(localStorage.token); // first beat immediately
-		heartbeatTimer = setInterval(() => sendXplanHeartbeat(localStorage.token), HEARTBEAT_MS);
+		heartbeatTimer = setInterval(() => {
+			if (onXplanPage($page.url.pathname)) sendXplanHeartbeat(localStorage.token);
+		}, HEARTBEAT_MS);
 	});
 
 	onDestroy(() => {
 		if (heartbeatTimer) clearInterval(heartbeatTimer);
 	});
+
+	// Beat immediately when entering an XPLAN page (don't wait up to 30s), and
+	// note when we leave so re-entry beats again.
+	$: {
+		const nowOn = typeof window !== 'undefined' && onXplanPage($page?.url?.pathname ?? '');
+		if (nowOn && !wasOnXplan) sendXplanHeartbeat(localStorage.token);
+		wasOnXplan = nowOn;
+	}
 </script>
+
+<!-- Floating chip for ordinary OWUI pages. The /apps/* shell is a full-screen
+     overlay with its own top bar, so it renders the chip inline there instead
+     (see (app)/apps/+layout.svelte) — skip it here to avoid two chips. -->
+{#if !$page.url.pathname.startsWith('/apps')}
+	<XplanStatusPill />
+{/if}
 
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />

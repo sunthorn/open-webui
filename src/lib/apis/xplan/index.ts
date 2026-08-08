@@ -26,6 +26,14 @@ export class XplanCancelledError extends Error {
 	}
 }
 
+/** Thrown when a write op is dispatched but XPLAN access is not 'full'. */
+export class XplanReadOnlyError extends Error {
+	constructor() {
+		super('READ_ONLY');
+		this.name = 'XplanReadOnlyError';
+	}
+}
+
 /**
  * Pull a human-readable string out of an error body. The OWUI proxy / hermes
  * can return the message as a plain string (`detail`/`error`) OR as a nested
@@ -55,8 +63,12 @@ export const runOperation = async <T = unknown>(
 	token: string,
 	params: Params = {},
 	fetchFn: typeof fetch = fetch,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	accessLevel?: 'lock' | 'readonly' | 'full'
 ): Promise<T> => {
+	// Write-gate seam: a mutating op only runs at Full access. Dormant today (no
+	// op sets write:true); armed for Phase-B. Default-deny when level is omitted.
+	if (op.write && accessLevel !== 'full') throw new XplanReadOnlyError();
 	const timeoutMs = op.timeoutMs ?? 120_000;
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);

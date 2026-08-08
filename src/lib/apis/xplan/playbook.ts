@@ -16,6 +16,7 @@ export interface XplanOperation {
 	timeoutMs?: number; // default 120_000
 	maxScrolls?: number; // default 0 = no scrolling
 	paging?: boolean; // op legitimately clicks through pages (softens the no-loop rail)
+	write?: boolean; // op mutates XPLAN — blocked in runOperation unless access is 'full'
 }
 
 // --- Migrated operations (Task 7) ------------------------------------------
