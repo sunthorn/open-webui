@@ -6,6 +6,7 @@
 	import { goto } from '$app/navigation';
 	import { activeClient } from '$lib/apps/activeClient';
 	import { DISCOVERY_STEPS, countDone, loadLeads, upsertLead, type Lead } from '$lib/apps/leads';
+	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	let lead: Lead | null = null;
 	let loading = true;
@@ -77,10 +78,21 @@
 			</button>
 		</div>
 	{:else}
-		<div class="mb-8">
+		<div class="mb-8 flex items-start justify-between gap-4">
+			<div>
 			<p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Stage 2 · Discovery Meeting</p>
 			<h1 class="text-2xl font-semibold tracking-tight mt-1">{lead.name}</h1>
 			<p class="text-sm text-gray-500 mt-1">Understand the client — {completed}/{DISCOVERY_STEPS.length} done.</p>
+			</div>
+			{#if $activeClient?.mode === 'existing'}
+				<!-- Only existing clients have an XPLAN record to open. -->
+				<XplanLink
+					path={`/factfind/view/${$activeClient.id}?role=client`}
+					label="Fact Find"
+					size="md"
+					title="Open this client's Fact Find in XPLAN"
+				/>
+			{/if}
 		</div>
 
 		<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">

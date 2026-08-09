@@ -16,13 +16,13 @@
 		saveOverviewSnapshot,
 		getXplanAccess,
 		getXplanStatus,
-		openInXplan,
 		getBriefing,
 		saveBriefing,
 		type XplanAccessLevel,
 		type DailyBriefing,
 		type BriefingItem
 	} from '$lib/apis/gateway';
+	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	let greeting = 'Hello';
 	let today = '';
@@ -60,17 +60,6 @@
 	const stopSync = () => syncCtrl?.abort();
 	const stopBriefing = () => briefCtrl?.abort();
 
-	// "View in XPLAN" — opens the real page in the debug browser (where the
-	// planner's session is), so they can check the source data themselves.
-	let openErr = '';
-	const viewInXplan = async (path: string) => {
-		openErr = '';
-		try {
-			await openInXplan(token(), path);
-		} catch (e: any) {
-			openErr = typeof e === 'string' ? e : (e?.message ?? 'Could not open XPLAN');
-		}
-	};
 
 	// Full timestamp: dd/mm/yy hh:mm (24h).
 	const fmt = (iso: string) => {
@@ -243,14 +232,8 @@
 				<h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Dashboard read</h2>
 				<div class="flex items-center gap-3">
 					{#if syncedAt}<span class="text-xs text-gray-400">{fmt(syncedAt)}</span>{/if}
-					<!-- Check the source: opens the real XPLAN dashboard in the debug window. -->
-					<button
-						on:click={() => viewInXplan('/dashboard/mainhtml')}
-						title="Open the XPLAN dashboard in the debug browser"
-						class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 transition"
-					>
-						View in XPLAN ↗
-					</button>
+					<!-- Check the source: the real XPLAN dashboard. -->
+					<XplanLink path="/dashboard/mainhtml" label="Dashboard" title="Open the XPLAN dashboard" />
 					{#if syncState === 'loading'}
 						<button
 							on:click={stopSync}
@@ -304,20 +287,8 @@
 					{/if}
 					<!-- The briefing is built from tasks + diary, so offer both sources.
 					     /xtasks/framelist/todo is XPLAN's own "Full list" of tasks. -->
-					<button
-						on:click={() => viewInXplan('/xtasks/framelist/todo')}
-						title="Open your full XPLAN task list in the debug browser"
-						class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 transition"
-					>
-						Tasks ↗
-					</button>
-					<button
-						on:click={() => viewInXplan('/diary/search?choice=my')}
-						title="Open your XPLAN diary in the debug browser"
-						class="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 transition"
-					>
-						Diary ↗
-					</button>
+					<XplanLink path="/xtasks/framelist/todo" label="Tasks" title="Open your XPLAN task list" />
+					<XplanLink path="/diary/search?choice=my" label="Diary" title="Open your XPLAN diary" />
 					{#if briefingState === 'loading'}
 						<button
 							on:click={stopBriefing}
@@ -378,7 +349,4 @@
 	<p class="text-xs text-gray-400 mt-4">
 		Read from your logged-in XPLAN in real time. The agent only reads — it never changes anything in XPLAN.
 	</p>
-	{#if openErr}
-		<p class="text-xs text-red-600 dark:text-red-400 mt-2">{openErr}</p>
-	{/if}
 </div>

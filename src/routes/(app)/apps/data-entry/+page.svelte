@@ -8,6 +8,7 @@
 	import { extractDocument, proposeMapping, type OnboardingProposal, type ProposalItem } from '$lib/apis/onboarding';
 	import { saveOnboardingSession } from '$lib/apis/gateway';
 	import { activeClient } from '$lib/apps/activeClient';
+	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	type Stage = 'start' | 'upload' | 'review' | 'write';
 	let stage: Stage = 'start';
@@ -167,7 +168,18 @@
 <div class="max-w-4xl mx-auto px-8 py-10">
 	<!-- Header + step indicator -->
 	<div class="mb-8">
-		<h1 class="text-2xl font-semibold tracking-tight">Data Entry &amp; Research</h1>
+		<div class="flex items-start justify-between gap-4">
+			<h1 class="text-2xl font-semibold tracking-tight">Data Entry &amp; Research</h1>
+			{#if $activeClient?.mode === 'existing'}
+				<!-- Compare the proposal against the client's real XPLAN record. -->
+				<XplanLink
+					path={`/factfind/view/${$activeClient.id}?role=client`}
+					label="Fact Find"
+					size="md"
+					title="Open this client's Fact Find in XPLAN"
+				/>
+			{/if}
+		</div>
 		<p class="text-sm text-gray-500 mt-1">
 			Stage 3 · Upload a client’s documents; the agent proposes what to enter into XPLAN. You approve
 			every item — nothing is written without your say-so.

@@ -5,6 +5,7 @@
 	import { onMount } from 'svelte';
 	import { getBriefing, saveBriefing, type DailyBriefing, type BriefingItem } from '$lib/apis/gateway';
 	import { gatherXplanBriefing, computeBriefing, XplanCancelledError } from '$lib/apis/xplan';
+	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	type State = 'loading' | 'empty' | 'error' | 'ready';
 	let state: State = 'loading';
@@ -102,6 +103,9 @@
 			</p>
 		</div>
 		<div class="shrink-0 flex items-center gap-2">
+			<!-- Check the source: the briefing is built from tasks + diary. -->
+			<XplanLink path="/xtasks/framelist/todo" label="Tasks" size="md" title="Open your XPLAN task list" />
+			<XplanLink path="/diary/search?choice=my" label="Diary" size="md" title="Open your XPLAN diary" />
 			{#if refreshing}
 				<button
 					on:click={stopRefresh}

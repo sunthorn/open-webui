@@ -10,6 +10,7 @@
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
+	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	let query = '';
 	let attention: string[] = [];
@@ -236,6 +237,13 @@
 			<p class="text-sm text-gray-500 mt-1">Search your synced XPLAN book, or create a new client.</p>
 		</div>
 		<div class="shrink-0 flex items-center gap-2">
+			<!-- Check the source: XPLAN's own client book. -->
+			<XplanLink
+				path="/factfind/search/result?role=client"
+				label="Client list"
+				size="md"
+				title="Open the client list in XPLAN"
+			/>
 			{#if syncing}
 				<button
 					on:click={stopSync}
