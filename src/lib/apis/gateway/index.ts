@@ -226,6 +226,21 @@ export const relaunchDebugBrowser = async (token: string): Promise<void> => {
 	}
 };
 
+/** Open an XPLAN page in the DEBUG browser (where the planner is signed in) —
+ *  a plain link would open in this browser and land on a login page.
+ *  `path` is site-relative, e.g. '/xtasks/framelist/todo'. */
+export const openInXplan = async (token: string, path: string): Promise<void> => {
+	const res = await fetch(`${gatewayUrl()}/gw/xplan/open`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+		body: JSON.stringify({ path })
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+};
+
 // --- XPLAN access tiers (Lock / Read-only / Full) -------------------------
 export type XplanAccessLevel = 'lock' | 'readonly' | 'full';
 
