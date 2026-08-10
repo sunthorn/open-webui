@@ -48,7 +48,6 @@
 	import AccountPending from '$lib/components/layout/Overlay/AccountPending.svelte';
 	import UpdateInfoToast from '$lib/components/layout/UpdateInfoToast.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
 	import { Shortcut, shortcuts } from '$lib/shortcuts';
 
 	const i18n = getContext('i18n');
@@ -408,12 +407,10 @@
 	}
 </script>
 
-<!-- Floating chip for ordinary OWUI pages. The /apps/* shell is a full-screen
-     overlay with its own top bar, so it renders the chip inline there instead
-     (see (app)/apps/+layout.svelte) — skip it here to avoid two chips. -->
-{#if !$page.url.pathname.startsWith('/apps')}
-	<XplanStatusPill />
-{/if}
+<!-- No XPLAN connection UI outside the XPLAN module. The debug browser and the
+     access tiers belong to /apps/* (rendered in its own top bar); everywhere
+     else — chat, workspace — the agent answers only from the axi database, so
+     there is nothing here for a connection control to mean. -->
 
 <SettingsModal bind:show={$showSettings} />
 <ChangelogModal bind:show={$showChangelog} />
