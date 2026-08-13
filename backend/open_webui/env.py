@@ -768,9 +768,12 @@ if LICENSE_PUBLIC_KEY:
 # WEBUI Identity
 ####################################
 
+# axi fork: upstream appends " (Open WebUI)" to any custom name, so WEBUI_NAME=axi
+# would render as "axi (Open WebUI)". Dropped under the licence's clause 4(i)
+# exemption — deployments with 50 or fewer end users in a rolling 30-day window
+# may alter the branding. RE-CHECK IF THE PRACTICE GROWS PAST 50 SEATS: above
+# that threshold this line must come back or an enterprise licence obtained.
 WEBUI_NAME = os.getenv('WEBUI_NAME', 'Open WebUI')
-if WEBUI_NAME != 'Open WebUI':
-    WEBUI_NAME += ' (Open WebUI)'
 
 WEBUI_FAVICON_URL = 'https://openwebui.com/favicon.png'
 WEBUI_BUILD_HASH = os.getenv('WEBUI_BUILD_HASH', 'dev-build')

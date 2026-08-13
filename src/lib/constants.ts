@@ -1,7 +1,10 @@
 import { browser, dev } from '$app/environment';
 // import { version } from '../../package.json';
 
-export const APP_NAME = 'Open WebUI';
+// axi fork: the name shown before /api/config arrives (tab title, first paint).
+// The server's WEBUI_NAME overwrites this a moment later — keep them in sync or
+// the page flashes the wrong name on load.
+export const APP_NAME = 'axi';
 
 export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
 export const WEBUI_BASE_URL = browser ? (dev ? `http://${WEBUI_HOSTNAME}` : ``) : ``;

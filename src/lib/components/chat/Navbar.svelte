@@ -9,7 +9,6 @@
 		config,
 		mobile,
 		settings,
-		showArchivedChats,
 		showControls,
 		showSidebar,
 		temporaryChatEnabled,
@@ -24,7 +23,6 @@
 	import ModelSelector from '../chat/ModelSelector.svelte';
 	import Tooltip from '../common/Tooltip.svelte';
 	import Menu from '$lib/components/layout/Navbar/Menu.svelte';
-	import UserMenu from '$lib/components/layout/Sidebar/UserMenu.svelte';
 	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
 
 	import PencilSquare from '../icons/PencilSquare.svelte';
@@ -38,7 +36,6 @@
 	import ChatPlus from '../icons/ChatPlus.svelte';
 	import ChatCheck from '../icons/ChatCheck.svelte';
 	import Knobs from '../icons/Knobs.svelte';
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	const i18n = getContext('i18n');
 
@@ -50,7 +47,11 @@
 	export let chat;
 	export let history;
 	export let selectedModels;
-	export let showModelSelector = true;
+	// axi fork: default flipped to false. This is an in-house tool for talking to
+	// the practice's own data, and only hermes-agent can reach it — every other
+	// entry in the picker was a plain LLM that answers about client records by
+	// guessing. DEFAULT_MODELS in docker-compose.yml pins the selection instead.
+	export let showModelSelector = false;
 
 	export let onSaveTempChat: () => {};
 	export let archiveChatHandler: (id: string) => void;
@@ -242,33 +243,10 @@
 						</Tooltip>
 					{/if}
 
-					{#if $user !== undefined && $user !== null}
-						<UserMenu
-							className="w-[240px]"
-							role={$user?.role}
-							help={true}
-							on:show={(e) => {
-								if (e.detail === 'archived-chat') {
-									showArchivedChats.set(true);
-								}
-							}}
-						>
-							<button
-								type="button"
-								class="select-none flex rounded-xl p-1.5 w-full hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-								aria-label={$i18n.t('User menu')}
-							>
-								<div class=" self-center">
-									<img
-										src={`${WEBUI_API_BASE_URL}/users/${$user?.id}/profile/image`}
-										class="size-6 object-cover rounded-full"
-										alt=""
-										draggable="false"
-									/>
-								</div>
-							</button>
-						</UserMenu>
-					{/if}
+					<!-- axi fork: the duplicate user menu that used to sit here was removed.
+					     The sidebar footer menu (Sidebar.svelte) is the single entry point
+					     now; its `help` prop was turned on so Documentation / Releases /
+					     Keyboard shortcuts survived the move. -->
 				</div>
 			</div>
 		</div>

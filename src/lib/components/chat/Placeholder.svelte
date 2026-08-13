@@ -107,57 +107,27 @@
 					}}
 				/>
 			{:else}
-				<div class="flex flex-row justify-center gap-2.5 @sm:gap-3 w-fit px-5 max-w-xl">
-					<div class="flex shrink-0 justify-center">
-						<div class="flex -space-x-4 mb-0.5" in:fade={{ duration: 100 }}>
-							{#each models as model, modelIdx}
-								<Tooltip
-									content={(models[modelIdx]?.info?.meta?.tags ?? [])
-										.map((tag) => tag.name.toUpperCase())
-										.join(', ')}
-									placement="top"
-								>
-									<button
-										aria-hidden={models.length <= 1}
-										aria-label={$i18n.t('Get information on {{name}} in the UI', {
-											name: models[modelIdx]?.name
-										})}
-										on:click={() => {
-											selectedModelIdx = modelIdx;
-										}}
-									>
-										<img
-											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-											class=" size-9 @sm:size-10 rounded-full border-[1px] border-gray-100 dark:border-none"
-											aria-hidden="true"
-											draggable="false"
-											on:error={(e) => {
-												e.currentTarget.src = '/favicon.png';
-											}}
-										/>
-									</button>
-								</Tooltip>
-							{/each}
-						</div>
+				<!-- axi fork: the per-model avatar row and the model name that used to
+				     head this screen are gone — there is only one model here and the
+				     planner never chooses it, so announcing "hermes-agent" told them
+				     nothing. The app logo stays (static /favicon.png, not the model's
+				     profile image) beside a greeting for the signed-in user. -->
+				<div class="flex flex-row justify-center items-center gap-2.5 @sm:gap-3 w-fit px-5 max-w-xl">
+					<div class="flex shrink-0 justify-center" in:fade={{ duration: 100 }}>
+						<img
+							src="/favicon.png"
+							class=" size-9 @sm:size-10 rounded-full border-[1px] border-gray-100 dark:border-none"
+							alt=""
+							aria-hidden="true"
+							draggable="false"
+						/>
 					</div>
 
 					<div
 						class=" text-3xl @sm:text-3xl line-clamp-1 flex items-center"
 						in:fade={{ duration: 100 }}
 					>
-						{#if models[selectedModelIdx]?.name}
-							<Tooltip
-								content={models[selectedModelIdx]?.name}
-								placement="top"
-								className=" flex items-center "
-							>
-								<span class="line-clamp-1">
-									{models[selectedModelIdx]?.name}
-								</span>
-							</Tooltip>
-						{:else}
-							{$i18n.t('Hello, {{name}}', { name: $user?.name })}
-						{/if}
+						{$i18n.t('Hello, {{name}}', { name: $user?.name })}
 					</div>
 				</div>
 

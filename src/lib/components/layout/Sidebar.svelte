@@ -517,7 +517,10 @@
 			document.documentElement.style.setProperty('--sidebar-width', `${w}px`);
 		});
 
-		showSidebar.set(!$mobile ? localStorage.sidebar === 'true' : false);
+		// axi fork: default to OPEN on desktop when the planner has never chosen.
+		// Upstream defaults to closed (`localStorage.sidebar === 'true'`), which
+		// hid chat history on every fresh browser profile.
+		showSidebar.set(!$mobile ? (localStorage.sidebar ?? 'true') === 'true' : false);
 
 		const unsubscribers = [
 			mobile.subscribe((value) => {
@@ -971,6 +974,7 @@
 							role={$user?.role}
 							profile={$config?.features?.enable_user_status ?? true}
 							showActiveUsers={false}
+							help={true}
 							on:show={(e) => {
 								if (e.detail === 'archived-chat') {
 									showArchivedChats.set(true);
@@ -1662,6 +1666,7 @@
 							role={$user?.role}
 							profile={$config?.features?.enable_user_status ?? true}
 							showActiveUsers={false}
+							help={true}
 							className="w-[calc(var(--sidebar-width)-1rem)]"
 							on:show={(e) => {
 								if (e.detail === 'archived-chat') {

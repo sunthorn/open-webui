@@ -2,16 +2,31 @@
 	// xplan-agent dashboard shell. Lives inside the (app) group so it inherits
 	// Open WebUI's auth + store setup, but renders its own app rail and hides
 	// the main chat sidebar while the planner is in the dashboard.
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { showSidebar } from '$lib/stores';
+	import { mobile, showSidebar } from '$lib/stores';
 	import AppsRail from '$lib/components/apps/AppsRail.svelte';
 	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
 	import { activeClient, clearActiveClient } from '$lib/apps/activeClient';
 
+	// The planner's own sidebar preference, borrowed for the length of the visit.
+	// Sidebar.svelte persists EVERY showSidebar change to localStorage.sidebar, so
+	// collapsing it here would overwrite that preference permanently — the sidebar
+	// would then stay shut on the way back to chat and on the next browser launch.
+	// Snapshot it, put it straight back, and re-apply it when we leave.
+	let plannerPreference = 'true';
+
 	onMount(() => {
+		plannerPreference = localStorage.sidebar ?? 'true';
 		// Collapse the OWUI chat sidebar so the dashboard owns the viewport.
 		showSidebar.set(false);
+		localStorage.sidebar = plannerPreference; // undo the subscriber's write
+	});
+
+	// Fires only when leaving /apps entirely — this layout survives navigation
+	// between the dashboard's own pages.
+	onDestroy(() => {
+		if (!$mobile) showSidebar.set(plannerPreference === 'true');
 	});
 </script>
 

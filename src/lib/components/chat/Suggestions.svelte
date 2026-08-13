@@ -71,13 +71,9 @@
 	{:else}
 		<!-- Keine Vorschläge -->
 
-		<div
-			class="flex w-full {$settings?.landingPageMode === 'chat'
-				? ' -mt-1'
-				: 'text-center items-center justify-center'}  self-start text-gray-600 dark:text-gray-400"
-		>
-			{$WEBUI_NAME} ‧ v{WEBUI_VERSION}
-		</div>
+		<!-- axi fork: was "{$WEBUI_NAME} ‧ v{WEBUI_VERSION}". The build version is a
+		     developer detail; the planner has no use for it and no action to take on
+		     it. Still visible in Settings → About for support purposes. -->
 	{/if}
 </div>
 
