@@ -862,12 +862,12 @@
 
 				<!-- xplan-agent dashboard entry (custom) — collapsed rail -->
 				<div>
-					<Tooltip content="xplan" placement="right">
+					<Tooltip content="Xplan" placement="right">
 						<a
 							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
 							href="/apps/overview"
 							draggable="false"
-							aria-label="xplan"
+							aria-label="Xplan"
 						>
 							<div class=" self-center flex items-center justify-center size-9">
 								<svg
@@ -891,12 +891,12 @@
 
 				<!-- salem (federated app) — collapsed rail -->
 				<div>
-					<Tooltip content="salem" placement="right">
+					<Tooltip content="Salem" placement="right">
 						<a
 							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
 							href="/salem/"
 							draggable="false"
-							aria-label="salem"
+							aria-label="Salem"
 						>
 							<div class=" self-center flex items-center justify-center size-9">
 								<svg
@@ -916,12 +916,12 @@
 
 				<!-- finny (federated app) — collapsed rail -->
 				<div>
-					<Tooltip content="finny" placement="right">
+					<Tooltip content="Finny" placement="right">
 						<a
 							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
 							href="/finny/"
 							draggable="false"
-							aria-label="finny"
+							aria-label="Finny"
 						>
 							<div class=" self-center flex items-center justify-center size-9">
 								<svg
@@ -1198,7 +1198,7 @@
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
 								href="/apps/overview"
 								draggable="false"
-								aria-label="xplan"
+								aria-label="Xplan"
 							>
 								<div class="self-center">
 									<svg
@@ -1217,7 +1217,7 @@
 									</svg>
 								</div>
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class="self-center text-sm font-primary">xplan</div>
+									<div class="self-center text-sm font-primary">Xplan</div>
 								</div>
 							</a>
 						</div>
@@ -1228,7 +1228,7 @@
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
 								href="/salem/"
 								draggable="false"
-								aria-label="salem"
+								aria-label="Salem"
 							>
 								<div class="self-center">
 									<svg
@@ -1243,7 +1243,7 @@
 									</svg>
 								</div>
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class="self-center text-sm font-primary">salem</div>
+									<div class="self-center text-sm font-primary">Salem</div>
 								</div>
 							</a>
 						</div>
@@ -1254,7 +1254,7 @@
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
 								href="/finny/"
 								draggable="false"
-								aria-label="finny"
+								aria-label="Finny"
 							>
 								<div class="self-center">
 									<svg
@@ -1269,7 +1269,7 @@
 									</svg>
 								</div>
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class="self-center text-sm font-primary">finny</div>
+									<div class="self-center text-sm font-primary">Finny</div>
 								</div>
 							</a>
 						</div>
