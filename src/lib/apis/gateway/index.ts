@@ -2,12 +2,15 @@
 // The browser talks ONLY to the gateway; it verifies the OWUI session token
 // (sent as Bearer) with security-layer and derives `owner` server-side.
 //
-// Gateway shares the app's host on port 8200. TODO(prod): serve same-origin
-// behind a reverse proxy so this port/scheme assumption goes away.
-// Derived from the current page's hostname at runtime so opening the app from
-// another host doesn't wrongly resolve `localhost` to the *user's* machine.
-const gatewayUrl = () =>
-	(typeof window !== 'undefined' ? `http://${window.location.hostname}:8200` : 'http://localhost:8200');
+// Same-origin: axi's Caddy front door proxies /gw/* to contact-layer:8200
+// (gateway/Caddyfile). This used to be an absolute http://<hostname>:8200 URL,
+// which became cross-origin once OWUI moved behind the gateway — contact-layer
+// scopes CORS to the OWUI origin, so every /gw call was rejected in the
+// browser and the XPLAN status pill disappeared from the apps top bar.
+//
+// Keeping it relative also means contact-layer needs no published host port:
+// the only way to reach XPLAN is through axi, which is the rule we want.
+const gatewayUrl = () => '';
 
 // Mirrors shared-contracts/api-responses.ts (DailyBriefing). Kept local until
 // the shared-types build-context gap is resolved — must stay in sync.

@@ -21,6 +21,10 @@
 	let browserUp = false;
 	let loggedIn: boolean | null = null;
 	let probed = false;
+	// The gateway itself is unreachable (network/CORS/auth), as opposed to
+	// reachable-but-reporting-a-problem. Tracked separately so the pill can say
+	// so instead of vanishing.
+	let unreachable = false;
 	let loaded = false;
 	let open = false;
 	let reopening = false;
@@ -30,7 +34,9 @@
 	$: step1 = !probed ? 'unknown' : browserUp ? 'ok' : 'todo';
 	$: step2 = loggedIn === true ? 'ok' : loggedIn === false ? 'fail' : 'unknown';
 
-	$: state = !probed
+	$: state = unreachable
+		? 'unreachable'
+		: !probed
 		? 'checking'
 		: !browserUp
 			? 'browser-down'
@@ -42,6 +48,7 @@
 
 	$: label = {
 		checking: 'Checking…',
+		unreachable: "Can't reach axi",
 		'browser-down': 'Browser not running',
 		signin: 'Sign in to XPLAN',
 		locked: 'Locked',
@@ -50,6 +57,7 @@
 
 	$: dot = {
 		checking: 'bg-gray-400',
+		unreachable: 'bg-red-500',
 		'browser-down': 'bg-red-500',
 		signin: 'bg-amber-500',
 		locked: 'bg-amber-500',
@@ -66,6 +74,7 @@
 			loggedIn = s.loggedIn;
 			level = lvl;
 			probed = true;
+			unreachable = false;
 			loaded = true;
 			return true;
 		} catch {
@@ -97,8 +106,17 @@
 	let timer: ReturnType<typeof setInterval> | null = null;
 	onMount(async () => {
 		// Auth token can 401 transiently while OWUI starts up — retry through it.
-		for (let i = 0; i < 6 && !(await refresh()); i++) {
+		let ok = false;
+		for (let i = 0; i < 6 && !(ok = await refresh()); i++) {
 			await new Promise((r) => setTimeout(r, 1000));
+		}
+		// Render REGARDLESS of the outcome. This block used to leave `loaded`
+		// false when the calls kept failing, so the pill — the only way to
+		// connect or sign in to XPLAN — silently removed itself from the top
+		// bar, giving the planner nothing to click and no reason why.
+		if (!ok) {
+			unreachable = true;
+			loaded = true;
 		}
 		timer = setInterval(refresh, 30_000);
 		window.addEventListener('focus', onFocus);
@@ -145,6 +163,16 @@
 				<p class="text-[11px] text-gray-500 mb-3">
 					Checking the connection is free — only refreshing uses the AI.
 				</p>
+
+				{#if unreachable}
+					<p
+						class="text-[11px] text-red-600 dark:text-red-400 mb-3 p-2 rounded-lg
+							bg-red-50 dark:bg-red-950/40"
+					>
+						axi's gateway didn't answer, so the steps below can't be checked. This is
+						axi itself, not XPLAN — nothing about your XPLAN session has changed.
+					</p>
+				{/if}
 
 				<ol class="space-y-3">
 					<!-- 1 · debug browser -->
