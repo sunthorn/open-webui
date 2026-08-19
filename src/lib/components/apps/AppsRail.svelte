@@ -148,10 +148,10 @@
 				</svg>
 			</a>
 		</Tooltip>
-		<Tooltip content="Back to Open WebUI" placement="right">
+		<Tooltip content="Back to axi" placement="right">
 			<a
 				href="/"
-				aria-label="Back to Open WebUI"
+				aria-label="Back to axi"
 				class="size-11 flex items-center justify-center rounded-2xl text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-900"
 			>
 				<svg

@@ -92,7 +92,7 @@
 		</div>
 
 		<p class="text-xs text-gray-400 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
-			Enforced in hermes and persisted, so it stays put across restarts. Replaces the
+			Enforced by axi and persisted, so it stays put across restarts. Replaces the
 			<code>scripts/xplan-guardrail.sh</code> command-line switch.
 		</p>
 	</div>

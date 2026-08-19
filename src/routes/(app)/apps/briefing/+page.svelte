@@ -184,7 +184,7 @@
 				</div>
 			{/each}
 			<p class="text-xs text-gray-400">
-				Sources: {briefing?.sources.join(', ')}. Chats stay in Open WebUI's native history.
+				Sources: {briefing?.sources.join(', ')}. Chats stay in axi's native history.
 			</p>
 		</div>
 	{/if}
