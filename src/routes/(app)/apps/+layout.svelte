@@ -39,8 +39,17 @@
 	<div class="flex-1 h-full flex flex-col min-w-0">
 		<!-- "Working on" context bar — the active client follows the planner across
 		     every app until they pick a new one on the Clients hub. -->
+		<!-- `relative z-[70]` is load-bearing, not decorative.
+		     `backdrop-blur` is a filter, and a filter creates a NEW STACKING
+		     CONTEXT. That trapped the status pill's popover: its z-[80] only
+		     ranked it against its siblings inside this bar, while the bar itself
+		     sat at z-auto. <main> below is also z-auto and comes later in the
+		     DOM, so page content — the Clients search box, the access-tier
+		     row — painted straight over the open popover.
+		     Lifting the whole bar above <main> fixes every page at once,
+		     because every /apps page shares this shell. -->
 		<div
-			class="shrink-0 h-11 px-5 flex items-center justify-center gap-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-950/40 backdrop-blur text-sm"
+			class="relative z-[70] shrink-0 h-11 px-5 flex items-center justify-center gap-3 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-950/40 backdrop-blur text-sm"
 		>
 			<!-- XPLAN connection + agent access. Leads the bar: it's the precondition
 			     for everything else, and its popover holds the full connect checklist. -->

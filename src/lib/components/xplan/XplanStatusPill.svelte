@@ -27,6 +27,8 @@
 	let unreachable = false;
 	let loaded = false;
 	let open = false;
+	/** The pill + its popover. Anything outside this closes the popover. */
+	let root: HTMLElement | null = null;
 	let reopening = false;
 	let reopenErr = '';
 
@@ -103,6 +105,19 @@
 		if (document.visibilityState === 'visible') refresh();
 	};
 
+	// Dismiss on click-away and on Escape — the popover covers the page, so the
+	// button that opened it is easy to lose track of. Listening in the CAPTURE
+	// phase so a click lands here even if the element underneath stops
+	// propagation; `root.contains` keeps clicks on the pill and inside the
+	// popover (the access-tier control) from closing it.
+	const onDocPointerDown = (e: Event) => {
+		if (!open || !root) return;
+		if (!root.contains(e.target as Node)) open = false;
+	};
+	const onKeydown = (e: KeyboardEvent) => {
+		if (e.key === 'Escape' && open) open = false;
+	};
+
 	let timer: ReturnType<typeof setInterval> | null = null;
 	onMount(async () => {
 		// Auth token can 401 transiently while OWUI starts up — retry through it.
@@ -121,21 +136,26 @@
 		timer = setInterval(refresh, 30_000);
 		window.addEventListener('focus', onFocus);
 		document.addEventListener('visibilitychange', onFocus);
+		document.addEventListener('pointerdown', onDocPointerDown, true);
+		document.addEventListener('keydown', onKeydown);
 	});
 	onDestroy(() => {
 		if (timer) clearInterval(timer);
 		window.removeEventListener('focus', onFocus);
 		document.removeEventListener('visibilitychange', onFocus);
+		document.removeEventListener('pointerdown', onDocPointerDown, true);
+		document.removeEventListener('keydown', onKeydown);
 	});
 </script>
 
 {#if loaded}
 	<!-- Floating mode must out-rank the apps shell (a full-screen overlay at
 	     z-[60] in (app)/apps/+layout.svelte). Inline mode sits in its top bar. -->
-	<div class={inline ? 'relative' : 'fixed top-1.5 right-3 z-[70]'}>
+	<div bind:this={root} class={inline ? 'relative' : 'fixed top-1.5 right-3 z-[70]'}>
 		<button
 			type="button"
 			on:click={() => (open = !open)}
+			aria-expanded={open}
 			title="XPLAN connection and agent access"
 			class="inline-flex items-center gap-1.5 whitespace-nowrap font-medium transition
 				text-xs px-2.5 py-1 rounded-full border
