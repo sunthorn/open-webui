@@ -6,8 +6,12 @@ import { browser, dev } from '$app/environment';
 // the page flashes the wrong name on load.
 export const APP_NAME = 'axi';
 
-export const WEBUI_HOSTNAME = browser ? (dev ? `${location.hostname}:8080` : ``) : '';
-export const WEBUI_BASE_URL = browser ? (dev ? `http://${WEBUI_HOSTNAME}` : ``) : ``;
+// Same-origin in dev as well as prod. Upstream points dev at :8080 (open-webui's
+// own port), but in the federated stack open-webui has no host port — it is only
+// reachable through the gateway. vite.config.ts proxies the backend paths to the
+// front door instead, which also means no CORS and a real session in dev.
+export const WEBUI_HOSTNAME = browser ? (dev ? location.host : ``) : '';
+export const WEBUI_BASE_URL = ``;
 export const WEBUI_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1`;
 
 export const OLLAMA_API_BASE_URL = `${WEBUI_BASE_URL}/ollama`;
