@@ -89,7 +89,26 @@
 	const MAX_BATCHES = 12; // 12 × 3 = 36 pages — well past 757/100=8, a safety cap
 	const BATCH_TIMEOUT_MS = 150_000;
 
+	/**
+	 * REFUSES TO SHRINK.
+	 *
+	 * On 2026-08-21 10:25 a sweep returned {total: 759, rows: []} and this
+	 * function wrote that straight over a full book. agent_output keeps ONE row
+	 * per (owner, key) and upserts with no history, so 759 clients were gone in
+	 * a single write. Nothing threw. The failure was indistinguishable from a
+	 * successful sync of an empty book.
+	 *
+	 * The map is cumulative and now always seeded from the stored book, so it
+	 * can only grow during a sync. A map smaller than what is stored therefore
+	 * means the sweep LOST rows — never that the book legitimately shrank.
+	 */
 	const persistBook = async (m: Map<string, XplanClient>, next: number) => {
+		if (m.size < book.length) {
+			throw new Error(
+				`Refusing to overwrite ${book.length} synced clients with ${m.size}. ` +
+					'The sweep returned fewer than are already stored, so nothing was saved.'
+			);
+		}
 		book = Array.from(m.values());
 		bookSyncedAt = nowIso();
 		bookNextPage = next;
@@ -108,8 +127,20 @@
 		const signal = syncController.signal;
 		// Resume seeds from the saved book (never shrink); a fresh sync starts empty.
 		const resuming = bookNextPage > 1;
+		// Seed from the stored book ALWAYS, not only on resume.
+		//
+		// A fresh sync used to start from an empty map while still persisting
+		// after every batch, so the stored book briefly shrank to whatever the
+		// first batch returned — and when that batch returned nothing, it shrank
+		// to zero permanently. Seeding means the map only ever grows, which is
+		// what makes the shrink guard in persistBook safe to enforce without
+		// blocking a legitimate re-sync.
+		//
+		// Trade-off, deliberate: a client deleted in XPLAN is no longer dropped
+		// from the local book by a fresh sync. There is no delete detection here
+		// anyway, and stale extra rows are recoverable. Losing the book is not.
 		const map = new Map<string, XplanClient>(
-			resuming ? book.map((c) => [c.id || c.name.toLowerCase(), c] as [string, XplanClient]) : []
+			book.map((c) => [c.id || c.name.toLowerCase(), c] as [string, XplanClient])
 		);
 		let navigateFirst = !resuming; // first batch of a fresh sync navigates (one search)
 		let reanchored = !resuming; // a resume may re-navigate ONCE if the tab drifted off results
@@ -159,6 +190,19 @@
 				// First batch failed to anchor (navigated but empty) — filter guard.
 				if (navigateFirst && res.total === 0 && res.rows.length === 0) {
 					syncErr = 'XPLAN returned an empty book — check the results filter is set to All Users, then sync again.';
+					break;
+				}
+				// CONTRACT VIOLATION — a failed read reported as a successful empty
+				// one. The playbook's outputSpec defines "no rows shown" as
+				// {"total":0,...}, so total>0 with zero rows is a state the agent is
+				// told never to produce: it read the "N to M of TOTAL" pager but not
+				// the table beneath it. This is the exact payload that emptied the
+				// book on 2026-08-21. Treat it as the failure it is, and persist
+				// nothing.
+				if (res.total > 0 && res.rows.length === 0) {
+					syncErr =
+						`XPLAN reported ${res.total} clients but the results table returned none. ` +
+						'Nothing was saved. This usually means the table had not finished loading — try again.';
 					break;
 				}
 				if (res.total) total = res.total;
