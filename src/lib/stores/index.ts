@@ -90,6 +90,13 @@ export const chatRequestQueues: Writable<
 
 export const sidebarWidth = writable(260);
 
+// axi rail state. activeApp is the rail selection (null = axi itself);
+// navLevel is 'root' or 'options' within the selected app.
+// See src/lib/apps/menu.ts and
+// docs/superpowers/plans/2026-08-24-axi-menu-consolidation.md
+export const activeApp = writable<string | null>(null);
+export const navLevel = writable<'root' | 'options'>('root');
+
 export const showSidebar = writable(false);
 export const showSearch = writable(false);
 export const showSettings = writable(false);

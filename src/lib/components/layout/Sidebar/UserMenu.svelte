@@ -358,51 +358,7 @@
 				</div>
 			{/if}
 
-			{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
-				<div class="flex items-center w-full">
-					<a
-						href="/notes"
-						draggable="false"
-						class="flex flex-1 rounded-xl py-1.5 px-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition cursor-pointer select-none"
-						on:click={async (e) => {
-							if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-							e.preventDefault();
-							show = false;
-							goto('/notes');
-							if ($mobile) {
-								await tick();
-								showSidebar.set(false);
-							}
-						}}
-					>
-						<div class="self-center mr-3">
-							<Note className="size-5" strokeWidth="1.5" />
-						</div>
-						<div class="self-center truncate">{$i18n.t('Notes')}</div>
-					</a>
-					{#if shiftKey}
-						<Tooltip
-							content={isPinned('notes')
-								? $i18n.t('Unpin from Sidebar')
-								: $i18n.t('Pin to Sidebar')}
-						>
-							<button
-								type="button"
-								class="p-1 mr-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition"
-								on:click|preventDefault|stopPropagation={() => togglePin('notes')}
-							>
-								{#if isPinned('notes')}
-									<PinSlash className="size-3.5" strokeWidth="1.5" />
-								{:else}
-									<Pin className="size-3.5" strokeWidth="1.5" />
-								{/if}
-							</button>
-						</Tooltip>
-					{/if}
-				</div>
-			{/if}
-
-			{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
+						{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
 				<div class="flex items-center w-full">
 					<a
 						href="/calendar"

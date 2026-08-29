@@ -1,42 +1,29 @@
 <script lang="ts">
-	// xplan-agent dashboard shell. Lives inside the (app) group so it inherits
-	// Open WebUI's auth + store setup, but renders its own app rail and hides
-	// the main chat sidebar while the planner is in the dashboard.
-	import { onDestroy, onMount } from 'svelte';
+	// xplan shell. Lives inside the (app) group so it inherits Open WebUI's auth
+	// and store setup, and now renders BESIDE axi's sidebar rather than over it.
+	//
+	// It used to be a fixed inset-0 overlay at z-[60] that covered axi's chrome
+	// entirely, and it collapsed the sidebar on the way in. That made sense when
+	// xplan carried its own rail. With the axi rail at the layout level, the
+	// overlay hid the very thing that is supposed to stay on screen: you clicked
+	// xPlan and the rail vanished.
+	//
+	// Gone with it: the localStorage.sidebar borrow-and-restore, which existed
+	// only to undo the collapse, and AppsRail, which the axi rail replaces.
 	import { goto } from '$app/navigation';
-	import { mobile, showSidebar } from '$lib/stores';
-	import AppsRail from '$lib/components/apps/AppsRail.svelte';
+	import { showSidebar } from '$lib/stores';
 	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
 	import { activeClient, clearActiveClient } from '$lib/apps/activeClient';
 
-	// The planner's own sidebar preference, borrowed for the length of the visit.
-	// Sidebar.svelte persists EVERY showSidebar change to localStorage.sidebar, so
-	// collapsing it here would overwrite that preference permanently — the sidebar
-	// would then stay shut on the way back to chat and on the next browser launch.
-	// Snapshot it, put it straight back, and re-apply it when we leave.
-	let plannerPreference = 'true';
-
-	onMount(() => {
-		plannerPreference = localStorage.sidebar ?? 'true';
-		// Collapse the OWUI chat sidebar so the dashboard owns the viewport.
-		showSidebar.set(false);
-		localStorage.sidebar = plannerPreference; // undo the subscriber's write
-	});
-
-	// Fires only when leaving /apps entirely — this layout survives navigation
-	// between the dashboard's own pages.
-	onDestroy(() => {
-		if (!$mobile) showSidebar.set(plannerPreference === 'true');
-	});
 </script>
 
-<!-- Full-viewport overlay so the dashboard fully replaces OWUI's chrome
-     (chat sidebar + main menu) instead of rendering beside it and overlapping. -->
+<!-- The same width rule every other axi page uses, so the rail and the panel
+     stay on screen and xplan fills what is left. -->
 <div
-	class="fixed inset-0 z-[60] flex flex-row h-screen w-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+	class="flex flex-col w-full h-screen max-h-[100dvh] min-w-0 transition-width duration-200 ease-in-out {$showSidebar
+		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
+		: ''} max-w-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
 >
-	<AppsRail />
-	<div class="flex-1 h-full flex flex-col min-w-0">
 		<!-- "Working on" context bar — the active client follows the planner across
 		     every app until they pick a new one on the Clients hub. -->
 		<!-- `relative z-[70]` is load-bearing, not decorative.
@@ -94,8 +81,7 @@
 			{/if}
 		</div>
 
-		<main class="flex-1 overflow-y-auto min-h-0">
-			<slot />
-		</main>
-	</div>
+	<main class="flex-1 overflow-y-auto min-h-0">
+		<slot />
+	</main>
 </div>
