@@ -103,7 +103,10 @@ export const APPS: AppDef[] = [
 			{
 				kind: 'link',
 				id: 'xplan-clients',
-				label: 'Clients',
+				// "Clients-Sync", not "Clients": finny's Documents panel has its own
+				// Clients row, and the two are different things. This one is the
+				// XPLAN-side client list the planner syncs from.
+				label: 'Clients-Sync',
 				href: '/apps/clients',
 				icon: ICON.users
 			},
@@ -213,7 +216,9 @@ export const APPS: AppDef[] = [
 	{
 		id: 'finny',
 		label: 'Documents',
-		icon: ICON.users,
+		// A document, not a person. The users glyph was left over from when this
+		// tab was called finny and led with its client list.
+		icon: ICON.doc,
 		href: '/x/finny/',
 		root: [
 			{

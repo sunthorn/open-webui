@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { v4 as uuidv4 } from 'uuid';
-	import Sortable from 'sortablejs';
 
 	import { goto } from '$app/navigation';
 	import {
@@ -48,7 +47,6 @@
 	} from '$lib/apis/chats';
 	import { createNewFolder, getFolders, updateFolderParentIdById } from '$lib/apis/folders';
 	import { createNewNote, getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
-	import { updateUserSettings } from '$lib/apis/users';
 	import { checkActiveChats } from '$lib/apis/tasks';
 	import { createNoteHandler } from '$lib/components/notes/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
@@ -108,7 +106,21 @@
 
 	let newFolderId = null;
 
+	// The order the same four rows appear in at the bottom of the sidebar, in the
+	// user menu. The pinned list up top now follows it, so a row sits in the same
+	// place whichever way you reach it -- pinning changes what is on the list, not
+	// where it lands. Pin order used to decide it, which meant the two lists
+	// disagreed for anyone who pinned in a different sequence.
+	const MENU_ITEM_ORDER = ['workspace', 'calendar', 'automations', 'playground'];
+
 	$: pinnedItems = $settings?.pinnedMenuItems ?? DEFAULT_PINNED_ITEMS;
+	// An id the order doesn't know about (a stale pin from an older build) sorts
+	// last rather than first, where -1 would have put it.
+	const menuItemRank = (id) => {
+		const i = MENU_ITEM_ORDER.indexOf(id);
+		return i === -1 ? MENU_ITEM_ORDER.length : i;
+	};
+	$: displayedPinnedItems = [...pinnedItems].sort((a, b) => menuItemRank(a) - menuItemRank(b));
 
 	const isMenuItemVisible = (id) => {
 		switch (id) {
@@ -146,25 +158,6 @@
 			playground: { label: 'Playground', href: '/playground', iconType: 'playground' }
 		};
 		return items[id];
-	};
-
-	const initPinnedMenuSortable = () => {
-		const el = document.getElementById('pinned-menu-items-list');
-		if (el && !$mobile) {
-			new Sortable(el, {
-				animation: 150,
-				onUpdate: async (event) => {
-					const itemId = event.item.dataset.id;
-					const newIndex = event.newIndex;
-					const current = [...pinnedItems];
-					const oldIndex = current.indexOf(itemId);
-					current.splice(oldIndex, 1);
-					current.splice(newIndex, 0, itemId);
-					settings.set({ ...$settings, pinnedMenuItems: current });
-					await updateUserSettings(localStorage.token, { ui: $settings });
-				}
-			});
-		}
 	};
 
 	$: if ($selectedFolder) {
@@ -603,7 +596,6 @@
 		socketInstance?.on('events', chatActiveEventHandler);
 
 		await tick();
-		initPinnedMenuSortable();
 
 		return () => {
 			unsubscribers.forEach((unsubscriber) => unsubscriber());
@@ -905,7 +897,7 @@
 					</div>
 
 					<div id="pinned-menu-items-list">
-						{#each pinnedItems as itemId (itemId)}
+						{#each displayedPinnedItems as itemId (itemId)}
 							{@const meta = getMenuItemMeta(itemId)}
 							{#if meta && isMenuItemVisible(itemId)}
 								<div
@@ -1149,14 +1141,16 @@
 					</Folder>
 				{/if}
 
+				<!-- No "Chats" heading. It is the last section in the sidebar and the
+				     only thing under it is the chat list, so the word named what was
+				     already obvious and cost a row. collapsible={false} drops the
+				     header entirely rather than leaving an empty one behind; the
+				     drop target lives on the wrapper, so dragging a chat here still
+				     moves it out of its folder. -->
 				<Folder
 					id="sidebar-chats"
 					className="px-2 mt-0.5"
-					name={$i18n.t('Chats')}
-					chevron={false}
-					on:change={async (e) => {
-						selectedFolder.set(null);
-					}}
+					collapsible={false}
 					on:import={(e) => {
 						importChatHandler(e.detail);
 					}}
