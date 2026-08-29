@@ -383,7 +383,13 @@
 	// on every other page. Fire-and-forget: sendXplanHeartbeat never throws.
 	// (If you add a new page that reads XPLAN, add its route prefix here.)
 	const HEARTBEAT_MS = 30_000;
-	const XPLAN_ROUTES = ['/apps/overview', '/apps/briefing', '/apps/clients'];
+	// /apps/settings earns its place for the opposite reason to the others: it is
+	// not a page that READS XPLAN, it is the page you land on when the browser is
+	// down. The caretaker only keeps Chrome alive while beats arrive (axi_active()
+	// in scripts/xplan-chrome-agent.py), so without this the connect page is the
+	// one place where "Reopen debug browser" brings Chrome up and nothing then
+	// keeps it there.
+	const XPLAN_ROUTES = ['/apps/overview', '/apps/briefing', '/apps/clients', '/apps/settings'];
 	const onXplanPage = (path: string) => XPLAN_ROUTES.some((r) => path.startsWith(r));
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	let wasOnXplan = false;

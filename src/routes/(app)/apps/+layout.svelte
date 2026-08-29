@@ -26,15 +26,14 @@
 >
 		<!-- "Working on" context bar — the active client follows the planner across
 		     every app until they pick a new one on the Clients hub. -->
-		<!-- `relative z-[70]` is load-bearing, not decorative.
-		     `backdrop-blur` is a filter, and a filter creates a NEW STACKING
-		     CONTEXT. That trapped the status pill's popover: its z-[80] only
-		     ranked it against its siblings inside this bar, while the bar itself
-		     sat at z-auto. <main> below is also z-auto and comes later in the
-		     DOM, so page content — the Clients search box, the access-tier
-		     row — painted straight over the open popover.
-		     Lifting the whole bar above <main> fixes every page at once,
-		     because every /apps page shares this shell. -->
+		<!-- `relative z-[70]` is kept deliberately. `backdrop-blur` is a filter,
+		     and a filter creates a NEW STACKING CONTEXT, so anything this bar ever
+		     overlays ranks only against its own siblings unless the bar itself
+		     out-ranks <main> (which is z-auto and later in the DOM). That trapped
+		     the status pill's popover, back when the pill had one; the popover is
+		     now the /apps/settings page and the pill is a plain link, so nothing
+		     depends on this today — but the trap is one line away from returning
+		     the moment anything in here floats. -->
 		<div
 			class="relative z-[70] shrink-0 h-11 flex items-center border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-950/40 backdrop-blur text-sm"
 		>
@@ -44,11 +43,12 @@
 			     page's left margin and the Change/clear pair ends on its right
 			     margin -- instead of the whole group floating in the middle with
 			     nothing under it lining up.
-			     (/apps/settings is max-w-2xl and /apps/data-entry max-w-4xl; 3xl is
-			     what the other five pages use, so those two are a shade off.) -->
+			     (/apps/data-entry is max-w-4xl; every other /apps page is 3xl, so
+			     that one is a shade off.) -->
 			<div class="w-full max-w-3xl mx-auto px-8 flex items-center justify-between gap-3">
 				<!-- Left edge: XPLAN connection + agent access. It's the precondition
-				     for everything else, and its popover holds the connect checklist. -->
+				     for everything else, so it reads first and links to the page
+				     that fixes whatever it is reporting. -->
 				<div class="shrink-0">
 					<XplanStatusPill inline />
 				</div>

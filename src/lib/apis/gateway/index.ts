@@ -178,6 +178,13 @@ export const saveOnboardingSession = async (token: string, sessionId: string, se
 
 // --- XPLAN guardrail (browser access on/off) -----------------------------
 // locked === true  → hermes cannot open/read/write XPLAN.
+//
+// Nothing in the UI calls these any more, and new code should not: `locked` is
+// only the `lock` tier of the three the gateway derives, so this pair cannot
+// tell Read-only from Full, and PUTting locked=false silently resets the mode to
+// read-only. Use getXplanAccess/setXplanAccess below — same state, all three
+// tiers, and one writer. Kept because the endpoints are still live and the
+// contact-layer tests exercise them.
 
 export const getGuardrail = async (token: string): Promise<boolean> => {
 	const res = await fetch(`${gatewayUrl()}/gw/guardrail`, {
