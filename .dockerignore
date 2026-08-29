@@ -18,3 +18,17 @@ uploads
 **/*.db
 _test
 backend/data/*
+
+# --- axi: build speed ---
+# .git was 412MB of the 856MB build context, and it changes on every commit,
+# so `COPY . .` was invalidated every time and the 19-minute vite build re-ran
+# even when no source had changed. svelte.config.js reads `git rev-parse HEAD`
+# for the version name used to trigger client reloads; APP_BUILD_HASH now
+# carries that instead, so nothing is lost by leaving git out.
+.git
+.gitignore
+
+# The host's own build output. The image takes /app/build from the build STAGE,
+# never from the context, so this was pure weight — 260MB that changed every
+# time anyone ran npm run build locally.
+/build

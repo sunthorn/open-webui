@@ -20,6 +20,13 @@ const config = {
 		// poll for new version name every 60 seconds (to trigger reload mechanic in +layout.svelte)
 		version: {
 			name: (() => {
+				// APP_BUILD_HASH first: inside Docker the .git directory is not in
+				// the build context (it was half the context size and invalidated
+				// the cache on every commit), so the git call below would always
+				// fall through. Compose passes the real SHA as BUILD_HASH.
+				if (process.env.APP_BUILD_HASH && process.env.APP_BUILD_HASH !== 'dev-build') {
+					return process.env.APP_BUILD_HASH;
+				}
 				try {
 					return child_process.execSync('git rev-parse HEAD').toString().trim();
 				} catch {

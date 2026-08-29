@@ -32,10 +32,15 @@ export default defineConfig({
 	// the session is the dev server's own.
 	server: {
 		proxy: Object.fromEntries(
-			['/api', '/ollama', '/openai', '/gw', '/static', '/cache', '/ws'].map((p) => [
-				p,
-				{ target: 'http://localhost:3000', changeOrigin: true, ws: p === '/ws' }
-			])
+			// /salem and /finny are here because the axi shell frames their pages
+			// at /x/<app>/... . Without them the frame would ask the DEV server for
+			// /salem/notes, get the SPA fallback, and render axi inside axi.
+			['/api', '/ollama', '/openai', '/gw', '/static', '/cache', '/ws', '/salem', '/finny'].map(
+				(p) => [
+					p,
+					{ target: 'http://localhost:3000', changeOrigin: true, ws: p === '/ws' }
+				]
+			)
 		)
 	},
 	build: {
