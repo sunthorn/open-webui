@@ -165,7 +165,7 @@
 					: 'text-red-600 dark:text-red-400';
 </script>
 
-<div class="max-w-4xl mx-auto px-8 py-10">
+<div class="max-w-3xl mx-auto px-8 py-10">
 	<!-- Header + step indicator -->
 	<div class="mb-8">
 		<div class="flex items-start justify-between gap-4">

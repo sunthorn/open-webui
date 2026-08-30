@@ -42,9 +42,8 @@
 			     page uses for its own content, so the status pill starts on the
 			     page's left margin and the Change/clear pair ends on its right
 			     margin -- instead of the whole group floating in the middle with
-			     nothing under it lining up.
-			     (/apps/data-entry is max-w-4xl; every other /apps page is 3xl, so
-			     that one is a shade off.) -->
+			     nothing under it lining up. Every /apps page now uses this same
+			     width -- data-entry was the last 4xl holdout. -->
 			<div class="w-full max-w-3xl mx-auto px-8 flex items-center justify-between gap-3">
 				<!-- Left edge: XPLAN connection + agent access. It's the precondition
 				     for everything else, so it reads first and links to the page
