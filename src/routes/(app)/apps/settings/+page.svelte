@@ -91,10 +91,14 @@
 	/**
 	 * Open XPLAN in the debug Chrome so the planner can sign in there.
 	 *
-	 * '/dashboard/' rather than a login URL: it is on the gateway's open-allowlist
-	 * and XPLAN redirects it to the sign-in page when there is no session, so one
-	 * path covers both "not signed in" (lands on login) and "already signed in"
-	 * (lands on the dashboard, and step 2 goes green).
+	 * This used to always open '/dashboard/', on the assumption that XPLAN would
+	 * redirect it to the sign-in page when there was no session. It does not --
+	 * unauthenticated '/dashboard/' returns a bare 404 (verified 2026-08-30), so
+	 * the button dropped the planner on an error page instead of a login form.
+	 * Worse, the status probe reads login state from the URL, and a 404
+	 * '/dashboard/' carries no login marker, so it reported "signed in".
+	 *
+	 * So: send them to the login page unless we already believe they are in.
 	 *
 	 * The tab opens in the OTHER browser window and nothing here can raise it —
 	 * the caretaker serves /health, /heartbeat and /relaunch, and has no focus
@@ -105,7 +109,7 @@
 		signingIn = true;
 		signInErr = '';
 		try {
-			await openInXplan(token(), '/dashboard/');
+			await openInXplan(token(), loggedIn === true ? '/dashboard/' : '/login2');
 			await pollUntil(() => loggedIn === true);
 		} catch (e: any) {
 			signInErr = typeof e === 'string' ? e : (e?.message ?? 'Could not open XPLAN');
