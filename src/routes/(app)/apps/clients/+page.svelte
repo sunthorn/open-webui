@@ -6,7 +6,7 @@
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getBriefing, getOutput, putOutput } from '$lib/apis/gateway';
+	import { getBriefing, getOutput, putOutput, sweepClientBook } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
@@ -23,6 +23,12 @@
 	// stopped partway (resume from there); 1 means start a fresh full sync.
 	let bookNextPage = 1;
 	let syncing = false;
+	// Set when the scripted read fails, revealing the agent sweep as a fallback.
+	let agentFallback = false;
+	// Only the agent sweep is abortable (it batches across many LLM calls).
+	// The scripted read is one ~6s call, so offering Stop for it would be a
+	// button that does nothing.
+	let agentRunning = false;
 	let syncErr = '';
 	let syncProgress = '';
 	// Lets the planner Stop a running sweep (aborts the in-flight page read and
@@ -119,9 +125,59 @@
 		});
 	};
 
+	/**
+	 * Read the whole book in one deterministic pass — no LLM, no tokens, ~6s.
+	 *
+	 * This replaces the agent sweep as the default because the agent CANNOT do
+	 * this job: the rows live in a same-origin iframe and hermes'
+	 * browser_snapshot does not descend into iframes, so the model was shown nav
+	 * chrome and honestly answered "no rows". contact-layer runs a fixed,
+	 * reviewed script in the page over CDP instead. See BACKLOG.md.
+	 *
+	 * No batching, no page cursor, no Stop: the whole book arrives at once, so
+	 * there is nothing to resume from. `nextPage` is written back as 1 to clear
+	 * any partial state a previous agent run left behind.
+	 */
 	const syncBook = async () => {
 		if (syncing) return;
 		syncing = true;
+		syncErr = '';
+		agentFallback = false;
+		syncProgress = 'Reading the client book…';
+		try {
+			const res = await sweepClientBook(token());
+			// Seed from the stored book so the map can only grow — persistBook
+			// refuses to shrink it, which is what keeps a bad read from wiping
+			// a good book.
+			const map = new Map<string, XplanClient>(
+				book.map((c) => [c.id || c.name.toLowerCase(), c] as [string, XplanClient])
+			);
+			for (const r of res.rows) {
+				// Key on the INDIVIDUAL id. r.householdId is shared by couples —
+				// deduping on it drops one partner from every pair.
+				map.set(r.id || r.name.toLowerCase(), { name: r.name, id: r.id });
+			}
+			await persistBook(map, 1);
+			syncProgress = '';
+			if (!res.complete && res.total) {
+				syncErr = `Read ${res.collected} of ${res.total}. The book is saved but may be incomplete — try again.`;
+			}
+		} catch (e: any) {
+			syncProgress = '';
+			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Could not read the client book');
+			// A 503 means the browser or XPLAN session is not ready. Either way the
+			// agent path is worth offering — it navigates and can re-anchor.
+			agentFallback = true;
+		} finally {
+			syncing = false;
+			agentRunning = false;
+		}
+	};
+
+	const syncBookViaAgent = async () => {
+		if (syncing) return;
+		syncing = true;
+		agentRunning = true;
 		syncErr = '';
 		syncController = new AbortController();
 		const signal = syncController.signal;
@@ -233,6 +289,7 @@
 			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
 		} finally {
 			syncing = false;
+			agentRunning = false;
 			syncProgress = '';
 			syncController = null;
 		}
@@ -288,7 +345,7 @@
 				size="md"
 				title="Open the client list in XPLAN"
 			/>
-			{#if syncing}
+			{#if syncing && agentRunning}
 				<button
 					on:click={stopSync}
 					class="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
@@ -306,9 +363,21 @@
 					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
 					Syncing…
 				{:else}
-					{bookNextPage > 1 ? 'Resume sync' : 'Sync client book'}
+					Sync client book
 				{/if}
 			</button>
+			{#if agentFallback && !syncing}
+				<!-- The scripted read failed. The agent path is slower and cannot see
+				     into the results iframe, but it DOES navigate and re-anchor the
+				     search, so it is worth a try when the tab has drifted. -->
+				<button
+					on:click={syncBookViaAgent}
+					class="inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
+					title="Slower, uses the AI, and may return nothing on framed pages"
+				>
+					Try the agent instead
+				</button>
+			{/if}
 		</div>
 	</div>
 
@@ -320,7 +389,7 @@
 			<span class="text-red-500">{syncErr}</span>
 		{:else if book.length && bookNextPage > 1}
 			<span class="text-amber-600 dark:text-amber-400">{book.length} synced so far · partial</span> — click
-			<span class="font-medium">Resume sync</span> to finish the book.
+			<span class="font-medium">Sync client book</span> to read the whole book in one pass.
 		{:else if book.length}
 			{book.length} clients synced{bookSyncedAt ? ` · ${fmt(bookSyncedAt)}` : ''}. Searching your local copy.
 		{:else}

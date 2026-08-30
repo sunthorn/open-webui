@@ -251,6 +251,46 @@ export const openInXplan = async (token: string, path: string): Promise<void> =>
 	}
 };
 
+/** One row of the client book, as the scripted sweep returns it. */
+export interface SweptClient {
+	/** The INDIVIDUAL client id (the row checkbox value). Unique per person. */
+	id: string;
+	/** The HOUSEHOLD id. Shared by couples — never dedupe on this. */
+	householdId: string;
+	name: string;
+}
+
+export interface BookSweepResponse {
+	total: number;
+	collected: number;
+	pages: number;
+	complete: boolean;
+	rows: SweptClient[];
+}
+
+/**
+ * Read the WHOLE client book deterministically — no LLM, no tokens, ~6s.
+ *
+ * The agent path cannot do this at all: the rows live in a same-origin iframe
+ * and hermes' browser_snapshot does not descend into iframes, so the model is
+ * shown nav chrome and honestly answers "no rows". contact-layer runs a fixed,
+ * reviewed script in the page over CDP instead. See BACKLOG.md.
+ *
+ * A 503 means the browser or XPLAN session is not ready (not signed in, tab
+ * closed) — worth surfacing differently from a real failure.
+ */
+export const sweepClientBook = async (token: string): Promise<BookSweepResponse> => {
+	const res = await fetch(`${gatewayUrl()}/gw/xplan/book-sweep`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) {
+		const body = await res.json().catch(() => ({}));
+		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+	}
+	return await res.json();
+};
+
 // --- XPLAN access tiers (Lock / Read-only / Full) -------------------------
 export type XplanAccessLevel = 'lock' | 'readonly' | 'full';
 
