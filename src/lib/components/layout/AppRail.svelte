@@ -31,8 +31,28 @@
 		const path = $page.url.pathname;
 		if (path !== syncedPath) {
 			syncedPath = path;
-			activeApp.set(appForPath(path)?.id ?? null);
-			navLevel.set('root');
+			const app = appForPath(path);
+			activeApp.set(app?.id ?? null);
+			/**
+			 * DERIVE the level from where we landed; do not blanket-reset to root.
+			 *
+			 * This used to be `navLevel.set('root')` unconditionally, which broke
+			 * every Options row: clicking "XPLAN access" navigated correctly and
+			 * then threw the menu straight back to the root list, losing the
+			 * selection. It only misbehaved on alternate clicks -- re-picking the
+			 * page you are already on changes no path, so this block never ran and
+			 * the menu stayed put. Hence "it happens every second click".
+			 *
+			 * Deriving it also fixes a deep link or reload of an Options page,
+			 * which previously opened on the root list with nothing highlighted.
+			 */
+			const inOptions = !!app?.options?.some(
+				(r) =>
+					r.kind === 'link' &&
+					!!r.href &&
+					(path === r.href || path.startsWith(r.href + '/'))
+			);
+			navLevel.set(inOptions ? 'options' : 'root');
 		}
 	}
 
