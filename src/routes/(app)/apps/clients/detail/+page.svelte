@@ -1,13 +1,37 @@
 <script lang="ts">
-	// Client detail — the planner-facing deep-sync surface (spec §6). Loads a
-	// cached ClientDetail instantly, then lets the planner pull a fresh copy of
-	// six XPLAN sections (contact/financials/insurance/tasks/notes/super) on
-	// demand. Token-spending: full sync reads 6 pages; per-section Re-sync
-	// reads 1.
+	// Client detail — the planner-facing sync surface.
+	//
+	// TWO reads live here, deliberately, and the page has to make the
+	// difference legible before anyone acts on a number:
+	//
+	//  1. THE SCRIPTED READ (primary). PUT /gw/clients/{id}/sync runs a fixed,
+	//     reviewed script over CDP across all 23 factfind pages and stores the
+	//     result in the firm-scoped client store. Seconds, deterministic, no
+	//     model call and no tokens. This is what the planner should press.
+	//
+	//  2. THE AGENT READ (kept). XPLAN does not server-render Tasks — they
+	//     arrive via JavaScript the scraper never sees — so the model path is
+	//     the ONLY way to read them. It covers six sections, is slower, and
+	//     spends tokens. Kept for exactly what the scraper cannot reach.
+	//
+	// They write to different places on purpose: the scripted read fills the
+	// firm-scoped tables (client data belongs to the practice); the agent read
+	// still writes the per-user `agent_output` blob at `client:{id}`. The blob
+	// stays until every reader has moved off it.
+	//
+	// Both are READS. Nothing on this page writes to XPLAN.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { activeClient } from '$lib/apps/activeClient';
-	import { getOutput, putOutput } from '$lib/apis/gateway';
+	import {
+		GatewayError,
+		deepSyncClient,
+		getClientDetail,
+		getOutput,
+		putOutput,
+		type XplanClientRecord,
+		type XplanClientSection
+	} from '$lib/apis/gateway';
 	import { PLAYBOOK } from '$lib/apis/xplan/playbook';
 	import {
 		runOperation,
@@ -27,6 +51,38 @@
 	} from '$lib/apis/xplan/deepSync';
 
 	const FRESH_DAYS = 7;
+
+	// Display names for the scripted read's sections, mirroring the `label`
+	// column of contact-layer/app/pages.py. A section missing from this map is
+	// title-cased rather than hidden, so a page added there still renders.
+	const STORE_LABELS: Record<string, string> = {
+		key_details: 'Key Details',
+		habits: 'Personal Habits',
+		contact: 'Contact & Demographics',
+		employment: 'Employment Details',
+		dependants: 'Dependants',
+		identity: 'Identity Check',
+		domicile: 'Domicile History',
+		category: 'Category / Marketing',
+		notes: 'File Notes',
+		client_report: 'Merge / Client Report',
+		cashflow: 'Income & Expenses',
+		balancesheet: 'Assets & Liabilities',
+		net_value: 'Net Position',
+		balance_sheet_custom: 'Balance Sheet',
+		budget: 'Budget',
+		annuities: 'Annuities',
+		super: 'Superannuation',
+		estate: 'Estate Details',
+		centrelink: 'Centrelink',
+		insurance_owner: 'Insurance · By Policy Owner',
+		insurance_life: 'Insurance · By Life Insured',
+		insurance_medical: 'Insurance · Medical',
+		insurance_general: 'Insurance · General'
+	};
+
+	const storeLabel = (section: string) =>
+		STORE_LABELS[section] ?? section.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 	const SECTION_LABELS: Record<ClientSectionName, string> = {
 		contact: 'Contact',
@@ -78,6 +134,97 @@
 	const ALREADY_RUNNING = 'A sync is already running — try again in a moment.';
 
 	const token = () => localStorage.getItem('token') ?? '';
+
+	// --- The scripted read (primary) ---------------------------------------
+	// Firm-scoped store: one record + one row per section, filled by
+	// PUT /gw/clients/{id}/sync and read back by GET /gw/clients/{id}.
+	let storeClient: XplanClientRecord | null = null;
+	let sections: XplanClientSection[] = [];
+	// null until the first load resolves — "not in the synced book" and "not
+	// loaded yet" must not look the same.
+	let inBook: boolean | null = null;
+	let scriptedRunning = false;
+	let scriptedMsg = '';
+	let scriptedErr = '';
+	// A 503 is the XPLAN session, not a fault in axi. The fix is "sign in
+	// again", so it gets its own amber notice rather than a red error.
+	let sessionExpired = false;
+
+	const loadStore = async () => {
+		if (!client || !hasXplanId) return;
+		try {
+			const d = await getClientDetail(token(), client.id);
+			inBook = d !== null;
+			storeClient = d?.client ?? null;
+			sections = d?.sections ?? [];
+		} catch (e) {
+			scriptedErr = e instanceof Error ? e.message : String(e);
+		}
+	};
+
+	/**
+	 * Read all 23 factfind pages with the reviewed script — seconds, no tokens.
+	 *
+	 * Reads only. The gateway stores each section server-side, so the reload
+	 * afterwards is what puts the fresh values on screen.
+	 */
+	const scriptedSync = async () => {
+		if (!client || !hasXplanId || scriptedRunning) return;
+		scriptedRunning = true;
+		scriptedMsg = '';
+		scriptedErr = '';
+		sessionExpired = false;
+		try {
+			const r = await deepSyncClient(token(), client.id);
+			await loadStore();
+			const parts = [`Read ${r.sectionsRead} pages`, `stored ${r.sectionsStored}`];
+			if (r.storeFailures) parts.push(`${r.storeFailures} failed to store`);
+			if (r.idsUsed.length > 1) parts.push(`covered the household (${r.idsUsed.join(', ')})`);
+			if (r.missingPanels.length)
+				parts.push(
+					`${r.missingPanels.length} page${r.missingPanels.length === 1 ? '' : 's'} were missing a panel the map expects — check those values`
+				);
+			scriptedMsg = parts.join(' · ') + '.';
+		} catch (e) {
+			if (e instanceof GatewayError && e.status === 503) sessionExpired = true;
+			else if (e instanceof GatewayError && e.status === 403)
+				scriptedErr = 'XPLAN access is set to Lock. Switch it to Read-only or Full on Home, then sync.';
+			else if (e instanceof GatewayError && e.status === 404)
+				scriptedErr =
+					'This client is not in the synced book yet — run “Sync client book” on the Clients page first.';
+			else scriptedErr = e instanceof Error ? e.message : String(e);
+		} finally {
+			scriptedRunning = false;
+		}
+	};
+
+	// Column order comes from the section's OWN headers; rows are header-keyed
+	// objects ({"Description": "Home"}), never positional arrays. Falling back
+	// to the first row's keys keeps a section readable if headers came back
+	// empty.
+	const columns = (s: XplanClientSection) =>
+		s.headers?.length ? s.headers : Object.keys(s.rows?.[0] ?? {});
+
+	// 'changed' = XPLAN's page structure moved; 'error' = the read failed.
+	// Either way data-layer kept the last good rows, so what is on screen is
+	// STALE — which is the one thing a planner must know before acting on a
+	// number. 'empty' is a successful read of a page with nothing on it.
+	const isStale = (s: XplanClientSection) => s.status === 'changed' || s.status === 'error';
+
+	const staleReason = (s: XplanClientSection) =>
+		s.status === 'changed'
+			? 'XPLAN’s page structure changed, so this page could not be read into the usual columns. These are the last good values.'
+			: 'The last read of this page failed. These are the last good values.';
+
+	const statusChip = (s: XplanClientSection) =>
+		({
+			ok: { label: 'Current', cls: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' },
+			empty: { label: 'Nothing recorded', cls: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400' },
+			changed: { label: 'Stale · page changed', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
+			error: { label: 'Stale · read failed', cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' }
+		})[s.status];
+
+	$: staleCount = sections.filter(isStale).length;
 
 	$: client = $activeClient;
 	// A 'new:'-prefixed id (or mode 'new') means no XPLAN entity id exists yet —
@@ -185,11 +332,18 @@
 			return;
 		}
 		if (hasXplanId) {
-			try {
-				detail = await getOutput<ClientDetail>(token(), `client:${client.id}`);
-			} catch (e) {
-				console.warn('client detail:', e);
-			}
+			// Both stores, in parallel: the firm-scoped sections the scripted
+			// read fills, and the legacy per-user blob the agent read still writes.
+			await Promise.all([
+				loadStore(),
+				(async () => {
+					try {
+						detail = await getOutput<ClientDetail>(token(), `client:${client.id}`);
+					} catch (e) {
+						console.warn('client detail:', e);
+					}
+				})()
+			]);
 		}
 	});
 </script>
@@ -211,38 +365,176 @@
 		</a>
 	</div>
 
-	{#if notLoggedIn}
-		<div class="mb-5 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-3">
-			XPLAN not connected — open debug Chrome and sign in
-		</div>
-	{/if}
-	{#if error}
-		<div class="mb-5 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">
-			{error}
-		</div>
-	{/if}
-
 	{#if !hasXplanId}
 		<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 p-8 text-center">
 			<p class="text-sm text-gray-500">No XPLAN id for this client</p>
 		</div>
 	{:else}
+		<!-- ===== 1. The scripted read — the primary action ==================
+		     23 pages, seconds, no AI credits. Deterministic, so this is what
+		     the planner should reach for; the AI path below exists only for
+		     what a scraper cannot see. -->
+		<section class="mb-8">
+			<div class="flex items-start justify-between gap-3 mb-3">
+				<div class="min-w-0">
+					<h2 class="text-sm font-semibold">XPLAN factfind</h2>
+					<p class="text-xs text-gray-500 mt-0.5">
+						All 23 factfind pages, read by script. Seconds, exact, no AI credits.
+					</p>
+				</div>
+				<button
+					on:click={scriptedSync}
+					disabled={scriptedRunning}
+					class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 disabled:cursor-wait transition"
+				>
+					{#if scriptedRunning}
+						<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+						Reading 23 pages…
+					{:else}
+						{sections.length ? 'Re-read from XPLAN' : 'Read from XPLAN'}
+					{/if}
+				</button>
+			</div>
+
+			{#if sessionExpired}
+				<div class="mb-3 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-3">
+					XPLAN signed you out (or the debug Chrome isn’t reachable). Sign in again in the
+					debug browser, then press Read from XPLAN — nothing is wrong with axi.
+				</div>
+			{/if}
+			{#if scriptedErr}
+				<div class="mb-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">
+					{scriptedErr}
+				</div>
+			{/if}
+			{#if scriptedMsg}
+				<p class="mb-3 text-xs text-gray-500">{scriptedMsg}</p>
+			{/if}
+
+			{#if staleCount}
+				<div class="mb-3 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-3">
+					{staleCount} section{staleCount === 1 ? ' is' : 's are'} showing last-good values, not a fresh
+					read. Check those before acting on the numbers.
+				</div>
+			{/if}
+
+			{#if sections.length}
+				<p class="text-xs text-gray-400 mb-2">
+					{sections.length} sections{storeClient?.deepSyncedAt
+						? ` · last read ${fmtAge(storeClient.deepSyncedAt)}`
+						: ''}
+				</p>
+				<div class="space-y-2">
+					{#each sections as s (s.section + s.fetchedViaId)}
+						{@const cols = columns(s)}
+						<details class="rounded-2xl border border-gray-100 dark:border-gray-800" open={isStale(s)}>
+							<summary class="flex items-center gap-2.5 px-4 py-3 cursor-pointer select-none">
+								<span class="text-sm font-medium flex-1 min-w-0 truncate">{storeLabel(s.section)}</span>
+								{#if s.rows?.length}
+									<span class="text-xs text-gray-400 tabular-nums">{s.rows.length} rows</span>
+								{/if}
+								<span class="text-[10px] px-1.5 py-0.5 rounded-full {statusChip(s).cls}">
+									{statusChip(s).label}
+								</span>
+							</summary>
+							<div class="px-4 pb-4">
+								{#if isStale(s)}
+									<p class="text-xs text-amber-700 dark:text-amber-400 mb-2">
+										{staleReason(s)} Last read {fmtAge(s.fetchedAt)}.
+									</p>
+								{/if}
+								{#if cols.length && s.rows?.length}
+									<div class="overflow-x-auto -mx-1">
+										<table class="w-full text-sm border-collapse">
+											<thead>
+												<tr class="text-left text-xs text-gray-400 uppercase tracking-wide">
+													{#each cols as h}
+														<th class="px-1 py-1.5 font-semibold whitespace-nowrap">{h}</th>
+													{/each}
+												</tr>
+											</thead>
+											<tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+												{#each s.rows as row}
+													<tr>
+														{#each cols as h}
+															<td class="px-1 py-1.5 align-top">{row[h] ?? ''}</td>
+														{/each}
+													</tr>
+												{/each}
+											</tbody>
+										</table>
+									</div>
+								{:else}
+									<p class="text-sm text-gray-500">Nothing recorded on this page in XPLAN.</p>
+								{/if}
+								<p class="text-[10px] text-gray-400 mt-2">
+									page {s.pageId} · read via id {s.fetchedViaId}{s.mapVersion
+										? ` · map v${s.mapVersion}`
+										: ' · no verified map yet'}
+								</p>
+							</div>
+						</details>
+					{/each}
+				</div>
+			{:else if inBook === false}
+				<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
+					<p class="text-sm text-gray-500">
+						This client isn’t in the synced book yet. Run <span class="font-medium">Sync client book</span>
+						on the Clients page, then read from XPLAN here.
+					</p>
+				</div>
+			{:else if inBook}
+				<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
+					<p class="text-sm text-gray-500">
+						No factfind pages read yet — press <span class="font-medium">Read from XPLAN</span>.
+					</p>
+				</div>
+			{/if}
+		</section>
+
+		<!-- ===== 2. The AI read — kept for what the script cannot see =======
+		     XPLAN does not server-render Tasks, so the scripted read above
+		     genuinely cannot see them. This path can: it is slower, spends
+		     tokens, and covers six sections. Labelled so nobody reaches for it
+		     by mistake. -->
+		<section class="border-t border-gray-100 dark:border-gray-800 pt-6">
+			<h2 class="text-sm font-semibold">AI read · Tasks and five other sections</h2>
+			<p class="text-xs text-gray-500 mt-0.5 mb-3">
+				Slower and spends AI credits. Worth it for <span class="font-medium">Tasks</span>, which XPLAN
+				builds in the browser and the scripted read above cannot see.
+			</p>
+
+			<!-- These two belong to the AI path only (fullSync/oneSection set
+			     them), so they live inside this section — at the top of the page
+			     they read as a fault in the scripted read above, which they
+			     never are. -->
+			{#if notLoggedIn}
+				<div class="mb-3 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-3">
+					XPLAN not connected — open debug Chrome and sign in
+				</div>
+			{/if}
+			{#if error}
+				<div class="mb-3 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">
+					{error}
+				</div>
+			{/if}
+
 		<!-- Full sync -->
 		<div class="flex items-center justify-between gap-3 mb-6">
 			<div class="flex items-center gap-2">
 			<button
 				on:click={fullSync}
 				disabled={busy}
-				class="inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 disabled:cursor-wait transition"
+				class="inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 disabled:cursor-wait transition"
 			>
 				{#if fullSyncActive}
 					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-					Syncing {progress + 1}/{SECTION_OPS.length} — {syncing ? SECTION_LABELS[syncing] : ''}…
+					Reading {progress + 1}/{SECTION_OPS.length} — {syncing ? SECTION_LABELS[syncing] : ''}…
 				{:else if busy}
 					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
 					Busy…
 				{:else}
-					{detail && isFresh ? 'Refresh' : 'Sync full details from XPLAN'}
+					{detail && isFresh ? 'Re-read with the AI' : 'Read 6 sections with the AI'}
 				{/if}
 			</button>
 			{#if busy}
@@ -351,5 +643,6 @@
 				</div>
 			{/each}
 		</div>
+		</section>
 	{/if}
 </div>

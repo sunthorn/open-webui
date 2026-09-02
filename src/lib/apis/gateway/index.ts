@@ -12,6 +12,45 @@
 // the only way to reach XPLAN is through axi, which is the rule we want.
 const gatewayUrl = () => '';
 
+/** A failed gateway call, carrying the status so callers can branch on it. */
+export class GatewayError extends Error {
+	/** HTTP status, so callers can tell 503 "sign in again" from a real fault. */
+	status: number;
+	constructor(message: string, status: number) {
+		super(message);
+		this.name = 'GatewayError';
+		this.status = status;
+	}
+}
+
+/**
+ * Turn a failed response into an Error a planner can read.
+ *
+ * `body?.detail` is NOT always a string. contact-layer raises its own errors
+ * with a string detail, but anything it forwards from data-layer arrives
+ * wrapped by envelope.error() as
+ *   {"detail": {"success": false, "error": {"code", "message"}}}
+ * — and `throw new Error(body?.detail ?? …)` on that object renders the
+ * literal text "[object Object]" in the UI, which names no cause and offers
+ * no next step. Dig out the message; fall back to the status code, never to
+ * a stringified object.
+ */
+const gatewayError = async (res: Response): Promise<GatewayError> => {
+	const body: any = await res.json().catch(() => ({}));
+	const d = body?.detail;
+	const text =
+		typeof d === 'string'
+			? d
+			: typeof d?.error?.message === 'string'
+				? d.error.message
+				: typeof d?.message === 'string'
+					? d.message
+					: typeof body?.error?.message === 'string'
+						? body.error.message
+						: '';
+	return new GatewayError(text.trim() || `Gateway error (${res.status})`, res.status);
+};
+
 // Mirrors shared-contracts/api-responses.ts (DailyBriefing). Kept local until
 // the shared-types build-context gap is resolved — must stay in sync.
 export type BriefingStatus = 'overdue' | 'due' | 'upcoming' | 'done';
@@ -44,8 +83,7 @@ export const getBriefing = async (token: string): Promise<DailyBriefing | null> 
 	});
 	if (res.status === 404) return null; // not built yet
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 	const body = await res.json(); // { success, data: AgentOutput }
 	return (body?.data?.content ?? null) as DailyBriefing | null;
@@ -59,8 +97,7 @@ export const saveBriefing = async (token: string, briefing: DailyBriefing): Prom
 		body: JSON.stringify({ kind: 'briefing', content: briefing })
 	});
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 };
 
@@ -100,8 +137,7 @@ export const getOverviewSnapshot = async (token: string): Promise<OverviewSnapsh
 	});
 	if (res.status === 404) return null;
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 	return ((await res.json())?.data?.content ?? null) as OverviewSnapshot | null;
 };
@@ -114,8 +150,7 @@ export const saveOverviewSnapshot = async (token: string, snapshot: OverviewSnap
 		body: JSON.stringify({ kind: 'overview_snapshot', content: snapshot })
 	});
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 };
 
@@ -128,8 +163,7 @@ export const getOutput = async <T = unknown>(token: string, key: string): Promis
 	});
 	if (res.status === 404) return null;
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 	return ((await res.json())?.data?.content ?? null) as T | null;
 };
@@ -141,8 +175,7 @@ export const putOutput = async (token: string, key: string, kind: string, conten
 		body: JSON.stringify({ kind, content })
 	});
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 };
 
@@ -157,8 +190,7 @@ export const getOnboardingSession = async (token: string, sessionId: string): Pr
 	});
 	if (res.status === 404) return null;
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 	return (await res.json())?.data?.content ?? null;
 };
@@ -171,8 +203,7 @@ export const saveOnboardingSession = async (token: string, sessionId: string, se
 		body: JSON.stringify({ kind: 'onboarding_session', content: session })
 	});
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 };
 
@@ -231,8 +262,7 @@ export const relaunchDebugBrowser = async (token: string): Promise<void> => {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 };
 
@@ -246,8 +276,7 @@ export const openInXplan = async (token: string, path: string): Promise<void> =>
 		body: JSON.stringify({ path })
 	});
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 };
 
@@ -285,8 +314,7 @@ export const sweepClientBook = async (token: string): Promise<BookSweepResponse>
 		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 	});
 	if (!res.ok) {
-		const body = await res.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Gateway error (${res.status})`);
+		throw await gatewayError(res);
 	}
 	return await res.json();
 };
@@ -318,4 +346,134 @@ export const setXplanAccess = async (token: string, level: XplanAccessLevel): Pr
 	});
 	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
 	return (await res.json()).level as XplanAccessLevel;
+};
+
+// --- The firm's XPLAN client store (Tasks 3-13) ---------------------------
+//
+// Three firm-scoped Postgres tables served by /gw/clients, filled by the
+// deterministic scraper — NOT the per-user `agent_output` blob the legacy
+// client book and `client:{id}` detail still use. Firm-scoped is the point:
+// this data belongs to the practice, so nothing here is keyed by OWUI user.
+//
+// Types mirror shared-contracts/api-responses.ts (XplanSectionStatus,
+// XplanClientRecord, XplanClientSection) field for field. They are copied,
+// not imported, for the same reason DailyBriefing above is: open-webui's
+// Docker build context is ./open-webui, so ../shared-contracts is not
+// reachable at build time. Must stay in sync — do not let them diverge.
+
+export type XplanSectionStatus = 'ok' | 'empty' | 'changed' | 'error';
+
+export interface XplanClientRecord {
+	xplanClientId: string;
+	xplanHouseholdId: string | null;
+	name: string;
+	syncedAt: string;
+	deepSyncedAt: string | null;
+}
+
+export interface XplanClientSection {
+	section: string; // e.g. 'balancesheet'
+	pageId: string; // the XPLAN page= value
+	fetchedViaId: string; // which id produced this — person or household
+	status: XplanSectionStatus;
+	mapVersion: number | null;
+	structureHash: string | null;
+	headers: string[];
+	/** Header-keyed, e.g. {"Description": "Home"} — NOT a positional array. */
+	rows: Record<string, string>[];
+	unmapped: Record<string, unknown>;
+	fetchedAt: string;
+}
+
+export interface ClientListResponse {
+	clients: XplanClientRecord[];
+	count: number;
+}
+
+export interface ClientDetailResponse {
+	client: XplanClientRecord;
+	sections: XplanClientSection[];
+}
+
+/** Search the firm's synced book. Local read — no XPLAN, no tokens, instant. */
+export const listClients = async (token: string, q = ''): Promise<ClientListResponse> => {
+	const res = await fetch(`${gatewayUrl()}/gw/clients?q=${encodeURIComponent(q)}`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw await gatewayError(res);
+	return await res.json();
+};
+
+/** One client and every stored section. Null when the client isn't in the book. */
+export const getClientDetail = async (
+	token: string,
+	clientId: string
+): Promise<ClientDetailResponse | null> => {
+	const res = await fetch(`${gatewayUrl()}/gw/clients/${encodeURIComponent(clientId)}`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (res.status === 404) return null;
+	if (!res.ok) throw await gatewayError(res);
+	return await res.json();
+};
+
+export interface DeepSyncResult {
+	clientId: string;
+	sectionsRead: number;
+	sectionsStored: number;
+	storeFailures: number;
+	deepSyncedStamped: boolean;
+	idsUsed: string[];
+	missingPanels: { section: string; fetchedViaId: string; missing: string[] }[];
+}
+
+/**
+ * Scripted deep sync for ONE client: 23 pages, seconds, no tokens.
+ *
+ * Deterministic — a reviewed script run in the page over CDP, not a model
+ * reading a screenshot. Reads only; XPLAN is never written to.
+ *
+ * A 503 means the XPLAN session expired or the debug browser is unreachable.
+ * That is "sign in again", not "report a bug" — catch GatewayError and check
+ * `.status` rather than showing it as a generic failure. 403 means the XPLAN
+ * access tier is set to Lock.
+ */
+export const deepSyncClient = async (token: string, clientId: string): Promise<DeepSyncResult> => {
+	const res = await fetch(`${gatewayUrl()}/gw/clients/${encodeURIComponent(clientId)}/sync`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) throw await gatewayError(res);
+	return await res.json();
+};
+
+export interface BookSyncResponse {
+	swept: number;
+	upserted: number;
+	total?: number;
+	pages?: number;
+	complete: boolean;
+	/** Present only when the sweep returned nothing — says why. */
+	reason?: string;
+	/** The swept rows, same shape as sweepClientBook()'s. Empty on `reason`. */
+	rows?: SweptClient[];
+}
+
+/**
+ * Sweep the whole book and upsert it into the firm's client store — ONE pass.
+ *
+ * Replaces sweepClientBook() as the clients page's sync. Both sweep XPLAN
+ * identically; this one additionally upserts server-side and hands the rows
+ * back, so the legacy `agent_output` book can be rebuilt from the SAME read.
+ * Calling both would mean two CDP sweeps by two writers that can disagree.
+ *
+ * 503 = session expired / browser unreachable ("sign in again"); 403 = Lock.
+ */
+export const syncClientBook = async (token: string): Promise<BookSyncResponse> => {
+	const res = await fetch(`${gatewayUrl()}/gw/clients/sync`, {
+		method: 'PUT',
+		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+	});
+	if (!res.ok) throw await gatewayError(res);
+	return await res.json();
 };

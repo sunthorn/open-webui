@@ -6,7 +6,7 @@
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { getBriefing, getOutput, putOutput, sweepClientBook } from '$lib/apis/gateway';
+	import { GatewayError, getBriefing, getOutput, putOutput, syncClientBook } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
@@ -137,6 +137,14 @@
 	 * No batching, no page cursor, no Stop: the whole book arrives at once, so
 	 * there is nothing to resume from. `nextPage` is written back as 1 to clear
 	 * any partial state a previous agent run left behind.
+	 *
+	 * ONE sweep, not two. This calls PUT /gw/clients/sync, which sweeps over
+	 * CDP *and* upserts the firm-scoped client store server-side, then hands
+	 * the same rows back for the legacy `agent_output` book below. The old
+	 * sweepClientBook() route would have swept a second time for the blob —
+	 * ~12s of XPLAN reads and two writers that can disagree about one book.
+	 * The dual-write survives the transition with a single writer and a
+	 * single read.
 	 */
 	const syncBook = async () => {
 		if (syncing) return;
@@ -145,30 +153,45 @@
 		agentFallback = false;
 		syncProgress = 'Reading the client book…';
 		try {
-			const res = await sweepClientBook(token());
+			const res = await syncClientBook(token());
+			const rows = res.rows ?? [];
+			if (!rows.length) {
+				// The server upserted nothing and said why (it refuses to send an
+				// empty book downstream). Persist nothing here either: a sweep that
+				// returned no rows is a failed read, not an empty book.
+				syncErr = res.reason ?? 'XPLAN returned no clients — nothing was saved. Try again.';
+				agentFallback = true;
+				return;
+			}
 			// Seed from the stored book so the map can only grow — persistBook
 			// refuses to shrink it, which is what keeps a bad read from wiping
 			// a good book.
 			const map = new Map<string, XplanClient>(
 				book.map((c) => [c.id || c.name.toLowerCase(), c] as [string, XplanClient])
 			);
-			for (const r of res.rows) {
+			for (const r of rows) {
 				// Key on the INDIVIDUAL id. r.householdId is shared by couples —
 				// deduping on it drops one partner from every pair.
 				map.set(r.id || r.name.toLowerCase(), { name: r.name, id: r.id });
 			}
 			await persistBook(map, 1);
-			syncProgress = '';
 			if (!res.complete && res.total) {
-				syncErr = `Read ${res.collected} of ${res.total}. The book is saved but may be incomplete — try again.`;
+				syncErr = `Read ${res.swept} of ${res.total}. The book is saved but may be incomplete — try again.`;
 			}
 		} catch (e: any) {
-			syncProgress = '';
-			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Could not read the client book');
-			// A 503 means the browser or XPLAN session is not ready. Either way the
-			// agent path is worth offering — it navigates and can re-anchor.
+			// A 503 is the XPLAN session, not a fault in axi — the fix is to sign
+			// in again, so say that instead of showing a bug-shaped error.
+			syncErr =
+				e instanceof GatewayError && e.status === 503
+					? 'XPLAN isn’t connected — sign in again in the debug Chrome, then sync.'
+					: typeof e === 'string'
+						? e
+						: (e?.message ?? 'Could not read the client book');
+			// Either way the agent path is worth offering — it navigates and can
+			// re-anchor the search.
 			agentFallback = true;
 		} finally {
+			syncProgress = '';
 			syncing = false;
 			agentRunning = false;
 		}
