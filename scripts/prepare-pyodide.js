@@ -125,6 +125,39 @@ async function copyPyodide() {
 }
 
 /**
+ * fetch() with exponential backoff.
+ *
+ * These calls hit pypi.org from inside `npm run build`, which runs in a Docker
+ * build alongside ten other services. Under that concurrency Docker Desktop's
+ * resolver drops queries and node throws `getaddrinfo ENOTFOUND pypi.org` --
+ * and because downloadPyPIWheels() is awaited at top level with no catch, a
+ * SINGLE dropped DNS packet aborts the whole image build:
+ *   #107 TypeError: fetch failed
+ *   #107   [cause]: Error: getaddrinfo ENOTFOUND pypi.org
+ *   target open-webui: failed to solve ... exit code: 1
+ * Observed 2026-09-04 on a clean rebuild. The npm steps in Dockerfile already
+ * carry retry/backoff for the same reason; this step was the one left bare.
+ */
+async function fetchWithRetry(url, attempts = 5) {
+	let lastErr;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			return await fetch(url);
+		} catch (err) {
+			lastErr = err;
+			if (attempt === attempts) break;
+			const waitMs = Math.min(2 ** attempt * 1000, 30000);
+			console.warn(
+				`  fetch failed (attempt ${attempt}/${attempts}) for ${url}: ${err.message}` +
+					` — retrying in ${waitMs}ms`
+			);
+			await new Promise((resolve) => setTimeout(resolve, waitMs));
+		}
+	}
+	throw lastErr;
+}
+
+/**
  * Download pure-Python wheels from PyPI and save them into static/pyodide/.
  * Also injects entries into pyodide-lock.json so that micropip resolves these
  * packages from the local server instead of fetching them from the internet.
@@ -141,7 +174,7 @@ async function downloadPyPIWheels() {
 
 	for (const pkg of pypiPackages) {
 		console.log(`Fetching PyPI metadata for: ${pkg}`);
-		const res = await fetch(`https://pypi.org/pypi/${pkg}/json`);
+		const res = await fetchWithRetry(`https://pypi.org/pypi/${pkg}/json`);
 		if (!res.ok) {
 			console.error(`Failed to fetch PyPI metadata for ${pkg}: ${res.status}`);
 			continue;
@@ -164,7 +197,7 @@ async function downloadPyPIWheels() {
 			console.log(`  Already exists: ${wheel.filename}`);
 		} catch {
 			console.log(`  Downloading: ${wheel.filename}`);
-			const wheelRes = await fetch(wheel.url);
+			const wheelRes = await fetchWithRetry(wheel.url);
 			if (!wheelRes.ok) {
 				console.error(`  Failed to download ${wheel.filename}: ${wheelRes.status}`);
 				continue;

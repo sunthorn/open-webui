@@ -148,6 +148,19 @@ COPY --chown=$UID:$GID ./backend/requirements.txt ./requirements.txt
 # Set UV_LINK_MODE to copy to prevent 0-byte file corruption in QEMU arm64 cross-builds
 ENV UV_LINK_MODE=copy
 
+# Same reasoning as the npm settings above, for pip/uv.
+#
+# torch is a multi-hundred-MB download and pip's default socket timeout is only
+# 15s. When this builds alongside the rest of the stack the connection stalls
+# past that and the whole image fails:
+#   ReadTimeoutError: HTTPSConnectionPool(host='download-r2.pytorch.org', ...)
+#   target open-webui: failed to solve ... exit code: 2
+# Observed 2026-09-04 after 617s. A longer timeout plus more retries lets a
+# stalled read recover instead of aborting a ten-minute build near the end.
+ENV PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    UV_HTTP_TIMEOUT=120
+
 RUN set -e; \
     pip3 install --no-cache-dir uv; \
     if [ "$USE_CUDA" = "true" ]; then \
