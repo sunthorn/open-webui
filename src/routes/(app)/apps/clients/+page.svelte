@@ -6,7 +6,7 @@
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { GatewayError, getBriefing, getOutput, putOutput, syncClientBook } from '$lib/apis/gateway';
+	import { GatewayError, getBriefing, getOutput, syncClientBook } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
@@ -99,14 +99,17 @@
 	 * REFUSES TO SHRINK.
 	 *
 	 * On 2026-08-21 10:25 a sweep returned {total: 759, rows: []} and this
-	 * function wrote that straight over a full book. agent_output keeps ONE row
-	 * per (owner, key) and upserts with no history, so 759 clients were gone in
-	 * a single write. Nothing threw. The failure was indistinguishable from a
-	 * successful sync of an empty book.
+	 * function wrote that straight over a full book (then persisted via
+	 * `agent_output`, since retired — the book now lives only in this
+	 * component's state and server-side in `xplan_client`). Nothing threw.
+	 * The failure was indistinguishable from a successful sync of an empty
+	 * book.
 	 *
 	 * The map is cumulative and now always seeded from the stored book, so it
 	 * can only grow during a sync. A map smaller than what is stored therefore
 	 * means the sweep LOST rows — never that the book legitimately shrank.
+	 * `/gw/clients/sync` can still return a short sweep, so this guard still
+	 * earns its place even though it now protects only the in-memory book.
 	 */
 	const persistBook = async (m: Map<string, XplanClient>, next: number) => {
 		if (m.size < book.length) {
@@ -118,11 +121,6 @@
 		book = Array.from(m.values());
 		bookSyncedAt = nowIso();
 		bookNextPage = next;
-		await putOutput(token(), 'clients', 'client_book', {
-			clients: book,
-			syncedAt: bookSyncedAt,
-			nextPage: next
-		});
 	};
 
 	/**
@@ -140,11 +138,11 @@
 	 *
 	 * ONE sweep, not two. This calls PUT /gw/clients/sync, which sweeps over
 	 * CDP *and* upserts the firm-scoped client store server-side, then hands
-	 * the same rows back for the legacy `agent_output` book below. The old
-	 * sweepClientBook() route would have swept a second time for the blob —
-	 * ~12s of XPLAN reads and two writers that can disagree about one book.
-	 * The dual-write survives the transition with a single writer and a
-	 * single read.
+	 * the same rows back to update this component's local book. The old
+	 * sweepClientBook() route would have swept a second time for the
+	 * now-retired `agent_output` blob — ~12s of XPLAN reads and two writers
+	 * that could disagree about one book. A single writer and a single read
+	 * survive the transition.
 	 */
 	const syncBook = async () => {
 		if (syncing) return;
