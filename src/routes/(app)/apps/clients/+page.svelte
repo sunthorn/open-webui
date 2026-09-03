@@ -74,13 +74,39 @@
 			bookSyncedAt = res.clients.reduce((latest, c) => (c.syncedAt > latest ? c.syncedAt : latest), '');
 			bookNextPage = 1;
 		} catch (e) {
+			// GET /gw/clients answers 403 (access tier is Lock), 409 (book never
+			// synced) or 502 (contact-layer's _raise_if_store_unavailable — the
+			// data-layer/store is unreachable). It never answers 503 — that
+			// status only comes from the CDP-touching routes (search-live, PUT
+			// /gw/clients/sync), which a page load never calls.
+			//
+			// "No clients yet" (409) and "could not read the clients we have"
+			// (403, 502, anything else) must never render the same message: a
+			// planner told to Sync when the real problem is an unreachable store
+			// syncs again, gets the same fault, and is no better off.
 			if (e instanceof GatewayError && e.status === 409) {
-				// "client book not synced" — the deliberate signal for a firm that
-				// has never run a sync, not a fault. Leave book empty; the
-				// "not synced yet" affordance below already covers this.
-			} else if (e instanceof GatewayError && e.status === 503) {
-				syncErr = 'XPLAN isn’t connected — sign in again in the debug Chrome, then sync.';
+				// The deliberate signal for a firm that has never run a sync, not
+				// a fault. Leave book empty; the "not synced yet" affordance below
+				// already covers this — it's the correct next step here.
+			} else if (e instanceof GatewayError && e.status === 502) {
+				// The store itself is unreachable (data-layer down, or a bad
+				// service token) — not an empty book. Syncing again will not help.
+				syncErr = 'The client store could not be reached. This is not a sync issue — try again shortly.';
+			} else if (e instanceof GatewayError && e.status === 403) {
+				// Matches the wording already used on the detail page for the
+				// same condition.
+				syncErr = 'XPLAN access is set to Lock. Switch it to Read-only or Full on Home, then sync.';
 			} else {
+				// Anything else (including a hypothetical 503 — defensive only;
+				// this endpoint cannot produce one today) is a genuine failure.
+				// Surface it instead of silently leaving the "not synced yet"
+				// message to imply nothing is wrong.
+				syncErr =
+					e instanceof GatewayError
+						? e.message
+						: typeof e === 'string'
+							? e
+							: (e?.message ?? 'Could not load the client book');
 				console.warn('client book:', e);
 			}
 		}
