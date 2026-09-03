@@ -6,7 +6,7 @@
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { GatewayError, getBriefing, getOutput, syncClientBook } from '$lib/apis/gateway';
+	import { GatewayError, getBriefing, listClients, syncClientBook } from '$lib/apis/gateway';
 	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
@@ -66,17 +66,23 @@
 			console.warn('leads:', e);
 		}
 		try {
-			const doc = await getOutput<{ clients: XplanClient[]; syncedAt: string; nextPage?: number }>(
-				token(),
-				'clients'
-			);
-			if (doc) {
-				book = doc.clients ?? [];
-				bookSyncedAt = doc.syncedAt ?? '';
-				bookNextPage = doc.nextPage ?? 1;
-			}
+			// The firm-scoped store, not the retired per-user blob: /gw/clients
+			// reads xplan_client directly, so the whole synced book is here on
+			// load — no manual Sync click needed to see what's already stored.
+			const res = await listClients(token());
+			book = res.clients.map((c) => ({ id: c.xplanClientId, name: c.name }));
+			bookSyncedAt = res.clients.reduce((latest, c) => (c.syncedAt > latest ? c.syncedAt : latest), '');
+			bookNextPage = 1;
 		} catch (e) {
-			console.warn('client book:', e);
+			if (e instanceof GatewayError && e.status === 409) {
+				// "client book not synced" — the deliberate signal for a firm that
+				// has never run a sync, not a fault. Leave book empty; the
+				// "not synced yet" affordance below already covers this.
+			} else if (e instanceof GatewayError && e.status === 503) {
+				syncErr = 'XPLAN isn’t connected — sign in again in the debug Chrome, then sync.';
+			} else {
+				console.warn('client book:', e);
+			}
 		}
 	});
 
