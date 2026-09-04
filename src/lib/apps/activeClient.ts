@@ -57,3 +57,16 @@ export const setActiveClient = (c: ActiveClient): void => {
 };
 
 export const clearActiveClient = (): void => activeClient.set(null);
+
+/**
+ * Forget the Recent list.
+ *
+ * Recent lives in localStorage, per browser — so it survives a wipe of the
+ * database, and clearing the client book does not clear it. Without this the
+ * only way to drop a name was DevTools.
+ *
+ * The active client is left alone: it has its own control in the top bar, and
+ * clearing Recent while you are still working on someone should not silently
+ * put you back to "no client selected".
+ */
+export const clearRecentClients = (): void => recentClients.set([]);

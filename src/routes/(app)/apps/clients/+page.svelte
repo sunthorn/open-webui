@@ -7,7 +7,12 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { GatewayError, getBriefing, listClients, syncClientBook } from '$lib/apis/gateway';
-	import { activeClient, recentClients, setActiveClient } from '$lib/apps/activeClient';
+	import {
+		activeClient,
+		clearRecentClients,
+		recentClients,
+		setActiveClient
+	} from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
@@ -476,7 +481,18 @@
 	<!-- Recent -->
 	{#if recentFiltered.length}
 		<section class="mb-6">
-			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Recent</h2>
+			<div class="flex items-baseline justify-between mb-2">
+				<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recent</h2>
+				<!-- Recent is per-browser localStorage, so it outlives a database
+				     wipe. Offer the only in-app way to forget it. -->
+				<button
+					on:click={clearRecentClients}
+					class="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:underline transition"
+					title="Forget the recently used clients on this browser"
+				>
+					Clear
+				</button>
+			</div>
 			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
 				{#each recentFiltered as c}
 					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
