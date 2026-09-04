@@ -385,9 +385,24 @@ export interface XplanClientSection {
 	fetchedAt: string;
 }
 
+/**
+ * Mirrors `XplanClientPage` in shared-contracts/api-responses.ts — kept local
+ * for the same reason the types above it are (the Docker build context is
+ * ./open-webui, so ../shared-contracts is unreachable at build time). Must
+ * stay in sync; do not let them diverge.
+ *
+ * `total`/`limit`/`offset` are optional ONLY to tolerate an older gateway
+ * that predates paging. Against a current one they are always present.
+ */
 export interface ClientListResponse {
 	clients: XplanClientRecord[];
+	/** Rows in THIS page. */
 	count: number;
+	/** Rows matching the query across the whole book — how a caller knows
+	 *  whether it has all of them. */
+	total?: number;
+	limit?: number;
+	offset?: number;
 }
 
 export interface ClientDetailResponse {
@@ -395,13 +410,62 @@ export interface ClientDetailResponse {
 	sections: XplanClientSection[];
 }
 
-/** Search the firm's synced book. Local read — no XPLAN, no tokens, instant. */
-export const listClients = async (token: string, q = ''): Promise<ClientListResponse> => {
-	const res = await fetch(`${gatewayUrl()}/gw/clients?q=${encodeURIComponent(q)}`, {
+/**
+ * ONE PAGE of the firm's synced book. Local read — no XPLAN, no tokens.
+ *
+ * The store caps `limit` at 1000 and the book is well past that, so a single
+ * call cannot return it whatever the limit. Use `listAllClients` below unless
+ * you genuinely want one page.
+ */
+export const listClients = async (
+	token: string,
+	q = '',
+	limit = 1000,
+	offset = 0
+): Promise<ClientListResponse> => {
+	const params = new URLSearchParams({
+		q,
+		limit: String(limit),
+		offset: String(offset)
+	});
+	const res = await fetch(`${gatewayUrl()}/gw/clients?${params}`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
 	if (!res.ok) throw await gatewayError(res);
 	return await res.json();
+};
+
+/** Pages requested per call — the store's hard ceiling on `limit`. */
+const CLIENT_PAGE_SIZE = 1000;
+/** Refuses to loop forever if a gateway ever stops advancing. 20k clients. */
+const CLIENT_PAGE_CAP = 20;
+
+/**
+ * The WHOLE book, paged until it is complete.
+ *
+ * The retired per-user blob held every row, so the Clients page listing 200
+ * of 4817 was a regression, not a limitation — and a silent one: a short
+ * list looks exactly like a small firm. It also weakened the shrink guard,
+ * which compares a fresh sweep against `book`; comparing 4817 swept rows
+ * against a 200-row `book` made that check meaningless.
+ *
+ * Stops when a page comes back short, when `total` says it has everything,
+ * or at the cap. Errors propagate — a partial book must never be presented
+ * as the whole one.
+ */
+export const listAllClients = async (token: string, q = ''): Promise<ClientListResponse> => {
+	const clients: XplanClientRecord[] = [];
+	let total: number | undefined;
+
+	for (let page = 0; page < CLIENT_PAGE_CAP; page++) {
+		const res = await listClients(token, q, CLIENT_PAGE_SIZE, clients.length);
+		total = res.total ?? total;
+		clients.push(...res.clients);
+		if (res.clients.length < CLIENT_PAGE_SIZE) break;
+		if (total !== undefined && clients.length >= total) break;
+	}
+
+	return { clients, count: clients.length, total: total ?? clients.length };
 };
 
 /** One client and every stored section. Null when the client isn't in the book. */

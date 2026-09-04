@@ -6,7 +6,7 @@
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { GatewayError, getBriefing, listClients, syncClientBook } from '$lib/apis/gateway';
+	import { GatewayError, getBriefing, listAllClients, syncClientBook } from '$lib/apis/gateway';
 	import {
 		activeClient,
 		clearRecentClients,
@@ -74,7 +74,13 @@
 			// The firm-scoped store, not the retired per-user blob: /gw/clients
 			// reads xplan_client directly, so the whole synced book is here on
 			// load — no manual Sync click needed to see what's already stored.
-			const res = await listClients(token());
+			//
+			// PAGED. One call returns at most the store's 1000-row ceiling, and
+			// the book is 4817, so a single request silently delivered a
+			// truncated list that looked exactly like a small firm — and left
+			// the shrink guard below comparing a full sweep against a fraction
+			// of the stored book, which made it stop guarding anything.
+			const res = await listAllClients(token());
 			book = res.clients.map((c) => ({ id: c.xplanClientId, name: c.name }));
 			bookSyncedAt = res.clients.reduce((latest, c) => (c.syncedAt > latest ? c.syncedAt : latest), '');
 			bookNextPage = 1;
