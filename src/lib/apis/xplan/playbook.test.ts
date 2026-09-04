@@ -167,6 +167,21 @@ describe('parsePipeTable (financials / insurance / notes)', () => {
 		expect(parsePipeTable('NONE')).toEqual([]);
 		expect(parsePipeTable('\n\n')).toEqual([]);
 	});
+	// Regression, 2026-09-04: hermes answered 200 with an upstream 404 as the
+	// message content. This parser accepted any non-empty text, so the error
+	// prose was stored as the client's financials/insurance/super/notes and
+	// marked status:"ok" — a failed read rendered as client data, in green.
+	it('rejects prose where a table was asked for', () => {
+		const upstream404 =
+			"API call failed after 3 retries: HTTP 404: Error code: 404 - [{'error': {'code': 404, " +
+			"'message': 'models/anthropic/claude-opus-4.6 is not found for API version v1main'}}]";
+		expect(() => parsePipeTable(upstream404)).toThrow(/no columns/i);
+	});
+	it('rejects a mixed answer where any row lost its columns', () => {
+		expect(() => parsePipeTable('Insurer B|Life|500000\nI could not read the page.')).toThrow(
+			/no columns/i
+		);
+	});
 });
 
 describe('parseClientTasks (client.tasks)', () => {

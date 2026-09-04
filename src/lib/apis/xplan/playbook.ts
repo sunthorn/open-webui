@@ -144,14 +144,35 @@ export const parseClientContact = (raw: string): ClientContact => {
 	};
 };
 
-/** Generic strict lines parser: one row per line, cells split on '|'. Shared
- * by client.financials / client.insurance / client.notes. */
-export const parsePipeTable = (raw: string): string[][] =>
-	raw
+/**
+ * Generic strict lines parser, shared by client.financials / client.insurance /
+ * client.notes / client.super: one row per line, cells joined with "|". An empty
+ * table is the literal `NONE`, filtered out here.
+ *
+ * REJECTS a line carrying no "|" at all. Every op using this parser declares at
+ * least four columns, so a pipe-free line is not a short row — it is prose that
+ * arrived where a table was asked for, and the only realistic source of prose
+ * is a failure. Accepting it is how, on 2026-09-04, an upstream 404 was stored
+ * as this client's financials, insurance, super and notes and shown green:
+ * the parser could not fail, so the section could only ever be "ok".
+ *
+ * Throwing here routes the section to status:"error" via runSection — the same
+ * red "Last sync failed" the JSON-parsed sections correctly showed for the very
+ * same upstream failure.
+ */
+export const parsePipeTable = (raw: string): string[][] => {
+	const lines = raw
 		.split('\n')
 		.map((l) => l.trim())
-		.filter((l) => l && l.toUpperCase() !== 'NONE')
-		.map((l) => l.split('|').map((c) => c.trim()));
+		.filter((l) => l && l.toUpperCase() !== 'NONE');
+	const prose = lines.find((l) => !l.includes('|'));
+	if (prose !== undefined) {
+		throw new Error(
+			`Expected a "|"-delimited table, got a line with no columns: ${prose.slice(0, 120)}`
+		);
+	}
+	return lines.map((l) => l.split('|').map((c) => c.trim()));
+};
 
 export const parseClientTasks = parseBriefingItems;
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runOperation, XplanNotLoggedInError, XplanCancelledError, XplanReadOnlyError, gatherXplanClientBook } from './index';
+import { runOperation, XplanNotLoggedInError, XplanCancelledError, XplanReadOnlyError, XplanUpstreamError, gatherXplanClientBook } from './index';
 import type { XplanOperation } from './playbook';
 
 const writeOp: XplanOperation = {
@@ -33,6 +33,25 @@ describe('runOperation', () => {
 		const fetchFn = vi.fn(async () => okResponse('NOT_LOGGED_IN'));
 		await expect(runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch))
 			.rejects.toBeInstanceOf(XplanNotLoggedInError);
+	});
+	// Regression, 2026-09-04: hermes returns an upstream model failure as a
+	// normal 200 answer. `op.parse` here is `(raw) => ({ raw })` — as lenient as
+	// the real `overview.summary` (`raw => raw`) and `parsePipeTable` were — so
+	// without this check the provider's 404 became the operation's "result".
+	it('throws XplanUpstreamError when hermes echoes a provider error as content', async () => {
+		const fetchFn = vi.fn(async () =>
+			okResponse(
+				"API call failed after 3 retries: HTTP 404: Error code: 404 - [{'error': {'code': 404, " +
+					"'message': 'models/anthropic/claude-opus-4.6 is not found for API version v1main'}}]"
+			)
+		);
+		await expect(runOperation(op, 'tok', {}, fetchFn as unknown as typeof fetch))
+			.rejects.toBeInstanceOf(XplanUpstreamError);
+	});
+	it('does not mistake ordinary content mentioning an error for a failure', async () => {
+		const fetchFn = vi.fn(async () => okResponse('Reviewed the error in the 2025 statement.'));
+		const out = await runOperation<{ raw: string }>(op, 'tok', {}, fetchFn as unknown as typeof fetch);
+		expect(out.raw).toBe('Reviewed the error in the 2025 statement.');
 	});
 	it('strips code fences before parsing', async () => {
 		const fetchFn = vi.fn(async () => okResponse('```json\nfenced\n```'));

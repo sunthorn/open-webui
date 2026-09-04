@@ -35,6 +35,39 @@ export class XplanReadOnlyError extends Error {
 }
 
 /**
+ * Thrown when hermes answered 200 but the message content is the UPSTREAM
+ * provider's error text rather than the output the op asked for.
+ *
+ * This is not hypothetical. On 2026-09-04 hermes' config.yaml still held
+ * `anthropic/claude-opus-4.6` on OpenRouter (no key), so provider "auto" fell
+ * through to Gemini and Google 404'd the Anthropic model id. hermes returned
+ * that 404 as the assistant's message, HTTP 200. `parsePipeTable` accepts any
+ * non-empty text, so four of six sections stored
+ *   [["API call failed after 3 retries: HTTP 404 ..."]]
+ * as the client's financials, insurance, super and notes — each marked
+ * status:"ok" with a green dot. A failed read became client data in an
+ * advice system, which is worse than failing loudly.
+ *
+ * The parsers are the structural defence (a pipe table now requires pipes);
+ * this is the backstop that covers ops whose parse is lenient by design —
+ * `overview.summary` is literally `(raw) => raw`.
+ */
+export class XplanUpstreamError extends Error {
+	constructor(detail: string) {
+		super(`The model call failed upstream: ${detail}`);
+		this.name = 'XplanUpstreamError';
+	}
+}
+
+/**
+ * Recognise a provider error envelope echoed back as message content. Matches
+ * the observed shapes rather than guessing broadly — a client note legitimately
+ * containing the word "error" must not be discarded as a failure.
+ */
+const UPSTREAM_ERROR =
+	/^\s*(?:API call failed|Error code:\s*\d|An error occurred\b)|\bis not found for API version\b|'status':\s*'NOT_FOUND'/i;
+
+/**
  * Pull a human-readable string out of an error body. The OWUI proxy / hermes
  * can return the message as a plain string (`detail`/`error`) OR as a nested
  * object (OpenAI shape `{error: {message}}`, FastAPI `{detail: {msg}}`). Passing
@@ -98,6 +131,10 @@ export const runOperation = async <T = unknown>(
 		const data = await res.json();
 		const raw = (data?.choices?.[0]?.message?.content ?? '').trim();
 		if (raw.split('\n').some((l: string) => l.trim() === 'NOT_LOGGED_IN')) throw new XplanNotLoggedInError();
+		// hermes reports an upstream model failure as a normal 200 answer, so the
+		// only thing separating a failed read from a good one is the words. Check
+		// BEFORE parsing: a lenient parser turns that prose into stored data.
+		if (UPSTREAM_ERROR.test(raw)) throw new XplanUpstreamError(raw.slice(0, 200));
 		const stripped = raw.replace(/^```(?:\w+)?\s*/i, '').replace(/\s*```$/i, '').trim();
 		return op.parse(stripped) as T;
 	} catch (e: any) {
