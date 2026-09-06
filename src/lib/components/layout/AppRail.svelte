@@ -13,7 +13,7 @@
 	import { page } from '$app/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { APPS, appForPath, ICON } from '$lib/apps/menu';
-	import { activeApp, navLevel, showSidebar, mobile } from '$lib/stores';
+	import { activeApp, optionsOpen, showSidebar, mobile } from '$lib/stores';
 
 	/**
 	 * Follow the URL, so a deep link or a reload lands on the right app.
@@ -27,24 +27,30 @@
 	 * moves. A rail click changes no path, so it cannot feed back into itself.
 	 */
 	let syncedPath = '';
+	let syncedApp: string | null = null;
 	$: {
 		const path = $page.url.pathname;
 		if (path !== syncedPath) {
 			syncedPath = path;
 			const app = appForPath(path);
-			activeApp.set(app?.id ?? null);
+			const id = app?.id ?? null;
+			activeApp.set(id);
+
 			/**
-			 * DERIVE the level from where we landed; do not blanket-reset to root.
+			 * Options stays open for the whole visit to a module, and only that.
 			 *
-			 * This used to be `navLevel.set('root')` unconditionally, which broke
-			 * every Options row: clicking "XPLAN access" navigated correctly and
-			 * then threw the menu straight back to the root list, losing the
-			 * selection. It only misbehaved on alternate clicks -- re-picking the
-			 * page you are already on changes no path, so this block never ran and
-			 * the menu stayed put. Hence "it happens every second click".
+			 * Three cases, and the order matters:
 			 *
-			 * Deriving it also fixes a deep link or reload of an Options page,
-			 * which previously opened on the root list with nothing highlighted.
+			 * 1. Landed on an Options page -- open it. This is what makes a deep
+			 *    link or a reload of, say, /x/salem/settings/admin/logs show the
+			 *    row it highlighted instead of a collapsed list with nothing lit.
+			 * 2. Moved to a DIFFERENT module -- shut it. Open is scratch state for
+			 *    the module you were in; carrying it across would mean every app
+			 *    inherits a section you opened somewhere else.
+			 * 3. Moved within the same module -- leave it exactly as it is. This
+			 *    is the case that used to fail: the old code reset the level on
+			 *    every path change, so clicking a setting navigated correctly and
+			 *    then threw the menu back to the root list, losing the selection.
 			 */
 			const inOptions = !!app?.options?.some(
 				(r) =>
@@ -52,13 +58,18 @@
 					!!r.href &&
 					(path === r.href || path.startsWith(r.href + '/'))
 			);
-			navLevel.set(inOptions ? 'options' : 'root');
+			if (inOptions) optionsOpen.set(id);
+			else if (id !== syncedApp) optionsOpen.set(null);
+			syncedApp = id;
 		}
 	}
 
 	const select = (id: string | null) => {
+		// Picking a DIFFERENT app closes Options, for the reason in the block
+		// above. Re-picking the one you are already in leaves it alone -- the
+		// rail icon is not a "collapse" button and should not act like one.
+		if (id !== $activeApp) optionsOpen.set(null);
 		activeApp.set(id);
-		navLevel.set('root');
 		// Collapsed, the rail is all there is. Picking something should show it,
 		// otherwise the click has no visible effect at all.
 		if (!$mobile && !$showSidebar) showSidebar.set(true);

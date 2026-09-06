@@ -90,12 +90,29 @@ export const chatRequestQueues: Writable<
 
 export const sidebarWidth = writable(260);
 
-// axi rail state. activeApp is the rail selection (null = axi itself);
-// navLevel is 'root' or 'options' within the selected app.
+// axi rail state. activeApp is the rail selection (null = axi itself).
 // See src/lib/apps/menu.ts and
 // docs/superpowers/plans/2026-08-24-axi-menu-consolidation.md
 export const activeApp = writable<string | null>(null);
-export const navLevel = writable<'root' | 'options'>('root');
+
+/**
+ * Which app currently has its Options section expanded, or null for none.
+ *
+ * An APP ID rather than a boolean, and that is the whole design. Options used
+ * to be a second screen that replaced the menu -- the app's own rows vanished
+ * behind a "‹ xPlan Options" header, so reaching a setting meant losing sight
+ * of everything else. It is one list now, and this says whether the tail of it
+ * is showing.
+ *
+ * Holding the id makes the rule "stays open while you move around inside the
+ * module" fall out on its own: the section renders open only for the app it
+ * names, so walking into another module shows that module collapsed. Leaving a
+ * module clears it outright (see AppRail), so coming back starts closed.
+ *
+ * Deliberately in memory only -- no localStorage. Open is a scratch state for
+ * the trip you are on, not a preference to carry into tomorrow.
+ */
+export const optionsOpen = writable<string | null>(null);
 
 export const showSidebar = writable(false);
 export const showSearch = writable(false);

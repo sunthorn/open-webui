@@ -10,6 +10,9 @@
  * system Settings alone, reached from the user menu. See
  * docs/superpowers/plans/2026-08-24-axi-menu-consolidation.md
  *
+ * `options` is not a second screen. It renders inline at the end of `root`,
+ * revealed by the Options row, so the app's own rows never leave the panel.
+ *
  * salem and finny rows point at /x/<app>/<path>, an axi route that hosts the
  * app's page inside the axi shell. They are deliberately NOT external: an
  * external href navigates the whole browser away and the app then draws its
@@ -29,7 +32,11 @@ export type MenuRow =
 			href: string;
 			icon: string;
 			external?: boolean;
-			/** opens this app's Options level instead of navigating */
+			/**
+			 * Toggles this app's Options section open and shut instead of
+			 * navigating. The rows appear inline beneath it, in the same list
+			 * and at the same indent as everything above.
+			 */
 			opensOptions?: boolean;
 	  };
 
@@ -73,7 +80,11 @@ export const ICON = {
 	sliders:
 		'M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75',
 	back: 'M15.75 19.5L8.25 12l7.5-7.5',
-	chevron: 'M8.25 4.5l7.5 7.5-7.5 7.5'
+	chevron: 'M8.25 4.5l7.5 7.5-7.5 7.5',
+	/** Options collapsed: points down, "there is more below". */
+	chevronDown: 'M19.5 8.25l-7.5 7.5-7.5-7.5',
+	/** Options expanded: points up, "click to put it away". */
+	chevronUp: 'M4.5 15.75l7.5-7.5 7.5 7.5'
 } as const;
 
 const optionsRow = (id: string): MenuRow => ({
