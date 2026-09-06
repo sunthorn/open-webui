@@ -57,29 +57,6 @@ export const parseClientList = (raw: string): XplanClient[] => {
 		.map((c) => ({ name: String(c.entity_name).trim(), id: String(c.entity_id ?? '') }));
 };
 
-export interface BookSweepResult {
-	total: number; // total entities XPLAN reports ("… of 757"), 0 if unknown
-	reachedEnd: boolean; // true once the last results page has been read
-	rows: XplanClient[];
-}
-
-export const parseBookSweep = (raw: string): BookSweepResult => {
-	const x = jsonOf(raw) as Record<string, unknown>;
-	if (!x || typeof x !== 'object' || Array.isArray(x)) {
-		throw new Error('XPLAN returned an unexpected format. Try again.');
-	}
-	const rowsIn = Array.isArray(x.rows) ? x.rows : [];
-	const rows: XplanClient[] = rowsIn
-		.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
-		.map((c) => ({ name: String(c.name ?? '').trim(), id: String(c.id ?? '') }))
-		.filter((c) => c.name.length > 0);
-	return {
-		total: Number.isFinite(Number(x.total)) ? Number(x.total) : 0,
-		reachedEnd: !!x.reachedEnd,
-		rows
-	};
-};
-
 export const parseBriefingItems = (raw: string): RawBriefingItem[] => {
 	const parsed = jsonOf(raw);
 	if (!Array.isArray(parsed)) return [];
@@ -333,30 +310,5 @@ export const PLAYBOOK: Record<string, XplanOperation> = {
 		outputSpec:
 			'one line per super/pension holding: fundName|member|balance|type (cells joined with |). If the page shows none, output exactly: NONE (column order is recon\'s best-effort estimate pending Task 13 live verification — read the actual table headers if they differ)',
 		parse: parsePipeTable
-	},
-	'clients.bookSweep': {
-		id: 'clients.bookSweep',
-		title: 'Sweep a batch of the client book from one search',
-		reconDoc: 'docs/superpowers/specs/2026-07-26-book-sweep-design.md',
-		// navigateFirst==='true' → navigate once (starts the single search);
-		// otherwise return '' so buildPrompt emits the do-NOT-navigate opening and
-		// the agent keeps paging the SAME search (avoids XPLAN's one-search modal).
-		url: (p) =>
-			p.navigateFirst === 'true' ? `${BASE}/factfind/search/result?role=client` : '',
-		paging: true,
-		navHints: [
-			'read the current results page, then advance by clicking the "Next" control at the bottom of the results table and waiting for the table to reload',
-			'repeat read-then-Next for up to {pages} pages total, or stop early if the Next control is absent or disabled (that means the last page was reached)',
-			'do NOT touch the search filter form and do NOT re-run the search — only click Next'
-		],
-		extract: [
-			'for every client row on each page you read: the name and the entity id',
-			'the "N to M of TOTAL" range shown above the results table (for TOTAL and to tell when the last page is reached)'
-		],
-		outputFormat: 'json',
-		outputSpec:
-			'ONE JSON object: {"total": <the number after "of", or 0 if not shown>, "reachedEnd": <true if you reached the last page — Next absent/disabled or M>=TOTAL — else false>, "rows": [{"name":"Surname, First","id":"<entity id>"}, ...]} covering EVERY row on the pages you read this batch. If no rows are shown: {"total":0,"reachedEnd":true,"rows":[]}',
-		parse: parseBookSweep,
-		timeoutMs: 150_000
 	}
 };

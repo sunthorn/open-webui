@@ -6,7 +6,7 @@
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { GatewayError, getBriefing, listAllClients, syncClientBook } from '$lib/apis/gateway';
+	import { GatewayError, getBriefing, listAllClients } from '$lib/apis/gateway';
 	import {
 		activeClient,
 		clearRecentClients,
@@ -14,7 +14,8 @@
 		setActiveClient
 	} from '$lib/apps/activeClient';
 	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
-	import { gatherXplanClientBook, XplanCancelledError, type XplanClient } from '$lib/apis/xplan';
+	import { type XplanClient } from '$lib/apis/xplan';
+	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	let query = '';
@@ -23,23 +24,7 @@
 
 	// The synced XPLAN client book (local copy).
 	let book: XplanClient[] = [];
-	let bookSyncedAt = '';
-	// Resume cursor: the next page a sweep should read. >1 means a prior sweep
-	// stopped partway (resume from there); 1 means start a fresh full sync.
-	let bookNextPage = 1;
-	let syncing = false;
-	// Set when the scripted read fails, revealing the agent sweep as a fallback.
-	let agentFallback = false;
-	// Only the agent sweep is abortable (it batches across many LLM calls).
-	// The scripted read is one ~6s call, so offering Stop for it would be a
-	// button that does nothing.
-	let agentRunning = false;
 	let syncErr = '';
-	let syncProgress = '';
-	// Lets the planner Stop a running sweep (aborts the in-flight page read and
-	// halts the loop so no further pages fire).
-	let syncController: AbortController | null = null;
-	const stopSync = () => syncController?.abort();
 
 	const token = () => localStorage.getItem('token') ?? '';
 	const nowIso = () => new Date().toISOString();
@@ -53,6 +38,17 @@
 		if (isNaN(d.getTime())) return iso;
 		const p = (n: number) => String(n).padStart(2, '0');
 		return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+	};
+
+	// "9 days ago", not a timestamp. This line exists to prompt a sync, and a
+	// dd/mm/yy hh:mm stamp makes the reader do the arithmetic.
+	const fmtAge = (iso: string) => {
+		const d = new Date(iso);
+		if (isNaN(d.getTime())) return '';
+		const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+		if (days <= 0) return 'today';
+		if (days === 1) return 'yesterday';
+		return `${days} days ago`;
 	};
 
 	onMount(async () => {
@@ -70,6 +66,37 @@
 		} catch (e) {
 			console.warn('leads:', e);
 		}
+		await reloadBook();
+	});
+
+	// The sync runs on axi's worker, not in this tab: leaving the page, or
+	// closing the browser, no longer loses it. This function just asks for it.
+	const syncBook = async () => {
+		syncErr = '';
+		await startJob(token(), 'book_sync');
+	};
+
+	$: bookJob = runningJob($syncJobs, 'book_sync');
+	$: lastBookRun = $syncJobs.last.book_sync;
+	$: lastBookSuccess = $syncJobs.lastSuccessAt.book_sync;
+
+	// Reload the book when a run FINISHES. The worker already wrote
+	// `xplan_client` server-side, so this is a plain re-read of the store —
+	// no merge, no cumulative map, and no browser-side shrink guard. That
+	// guard existed because a sweep once returned zero rows and the browser
+	// wrote them over a full book; the refusal now lives in data-layer
+	// (EMPTY_BOOK) and in the worker, which never sends an empty payload. A
+	// second opinion here would only be a place for the two to disagree.
+	let seenBookRun = '';
+	$: if (lastBookRun && lastBookRun.id !== seenBookRun) {
+		seenBookRun = lastBookRun.id;
+		void reloadBook();
+		// `skipped` is not a failure of the data — it means we did not look.
+		// Say which, because the next step differs: sign in vs try again.
+		syncErr = lastBookRun.error ?? '';
+	}
+
+	const reloadBook = async () => {
 		try {
 			// The firm-scoped store, not the retired per-user blob: /gw/clients
 			// reads xplan_client directly, so the whole synced book is here on
@@ -82,8 +109,6 @@
 			// of the stored book, which made it stop guarding anything.
 			const res = await listAllClients(token());
 			book = res.clients.map((c) => ({ id: c.xplanClientId, name: c.name }));
-			bookSyncedAt = res.clients.reduce((latest, c) => (c.syncedAt > latest ? c.syncedAt : latest), '');
-			bookNextPage = 1;
 		} catch (e) {
 			// GET /gw/clients answers 403 (access tier is Lock), 409 (book never
 			// synced) or 502 (contact-layer's _raise_if_store_unavailable — the
@@ -120,242 +145,6 @@
 							: (e?.message ?? 'Could not load the client book');
 				console.warn('client book:', e);
 			}
-		}
-	});
-
-	// Manual sync — sweeps the XPLAN client book in BATCHES of pages from a
-	// SINGLE search (navigate once, then only click Next) so XPLAN's "one search
-	// at a time" modal never fires. Token-spending; built to be resilient:
-	//  • each batch gets a generous timeout and one retry;
-	//  • rows accumulate into a Map keyed by entity id, so re-reads at batch
-	//    boundaries (or a resume that re-anchors the search) dedupe harmlessly;
-	//  • progress is persisted after every batch. `nextPage` is now just a
-	//    sentinel — 1 = complete/fresh, 2 = partial. A Stop/failure leaves a
-	//    partial; Resume RE-RUNS the sweep and dedupe skips what's already
-	//    synced (correctness never depends on the browser tab staying put — the
-	//    trade-off is a resume re-reads from the front rather than a page cursor).
-	const PAGES_PER_BATCH = 3;
-	const MAX_BATCHES = 12; // 12 × 3 = 36 pages — well past 757/100=8, a safety cap
-	const BATCH_TIMEOUT_MS = 150_000;
-
-	/**
-	 * REFUSES TO SHRINK.
-	 *
-	 * On 2026-08-21 10:25 a sweep returned {total: 759, rows: []} and this
-	 * function wrote that straight over a full book (then persisted via
-	 * `agent_output`, since retired — the book now lives only in this
-	 * component's state and server-side in `xplan_client`). Nothing threw.
-	 * The failure was indistinguishable from a successful sync of an empty
-	 * book.
-	 *
-	 * The map is cumulative and now always seeded from the stored book, so it
-	 * can only grow during a sync. A map smaller than what is stored therefore
-	 * means the sweep LOST rows — never that the book legitimately shrank.
-	 * `/gw/clients/sync` can still return a short sweep, so this guard still
-	 * earns its place even though it now protects only the in-memory book.
-	 */
-	const persistBook = async (m: Map<string, XplanClient>, next: number) => {
-		if (m.size < book.length) {
-			throw new Error(
-				`Refusing to overwrite ${book.length} synced clients with ${m.size}. ` +
-					'The sweep returned fewer than are already stored, so nothing was saved.'
-			);
-		}
-		book = Array.from(m.values());
-		bookSyncedAt = nowIso();
-		bookNextPage = next;
-	};
-
-	/**
-	 * Read the whole book in one deterministic pass — no LLM, no tokens, ~6s.
-	 *
-	 * This replaces the agent sweep as the default because the agent CANNOT do
-	 * this job: the rows live in a same-origin iframe and hermes'
-	 * browser_snapshot does not descend into iframes, so the model was shown nav
-	 * chrome and honestly answered "no rows". contact-layer runs a fixed,
-	 * reviewed script in the page over CDP instead. See BACKLOG.md.
-	 *
-	 * No batching, no page cursor, no Stop: the whole book arrives at once, so
-	 * there is nothing to resume from. `nextPage` is written back as 1 to clear
-	 * any partial state a previous agent run left behind.
-	 *
-	 * ONE sweep, not two. This calls PUT /gw/clients/sync, which sweeps over
-	 * CDP *and* upserts the firm-scoped client store server-side, then hands
-	 * the same rows back to update this component's local book. The old
-	 * sweepClientBook() route would have swept a second time for the
-	 * now-retired `agent_output` blob — ~12s of XPLAN reads and two writers
-	 * that could disagree about one book. A single writer and a single read
-	 * survive the transition.
-	 */
-	const syncBook = async () => {
-		if (syncing) return;
-		syncing = true;
-		syncErr = '';
-		agentFallback = false;
-		syncProgress = 'Reading the client book…';
-		try {
-			const res = await syncClientBook(token());
-			const rows = res.rows ?? [];
-			if (!rows.length) {
-				// The server upserted nothing and said why (it refuses to send an
-				// empty book downstream). Persist nothing here either: a sweep that
-				// returned no rows is a failed read, not an empty book.
-				syncErr = res.reason ?? 'XPLAN returned no clients — nothing was saved. Try again.';
-				agentFallback = true;
-				return;
-			}
-			// Seed from the stored book so the map can only grow — persistBook
-			// refuses to shrink it, which is what keeps a bad read from wiping
-			// a good book.
-			const map = new Map<string, XplanClient>(
-				book.map((c) => [c.id || c.name.toLowerCase(), c] as [string, XplanClient])
-			);
-			for (const r of rows) {
-				// Key on the INDIVIDUAL id. r.householdId is shared by couples —
-				// deduping on it drops one partner from every pair.
-				map.set(r.id || r.name.toLowerCase(), { name: r.name, id: r.id });
-			}
-			await persistBook(map, 1);
-			if (!res.complete && res.total) {
-				syncErr = `Read ${res.swept} of ${res.total}. The book is saved but may be incomplete — try again.`;
-			}
-		} catch (e: any) {
-			// A 503 is the XPLAN session, not a fault in axi — the fix is to sign
-			// in again, so say that instead of showing a bug-shaped error.
-			syncErr =
-				e instanceof GatewayError && e.status === 503
-					? 'XPLAN isn’t connected — sign in again in the debug Chrome, then sync.'
-					: typeof e === 'string'
-						? e
-						: (e?.message ?? 'Could not read the client book');
-			// Either way the agent path is worth offering — it navigates and can
-			// re-anchor the search.
-			agentFallback = true;
-		} finally {
-			syncProgress = '';
-			syncing = false;
-			agentRunning = false;
-		}
-	};
-
-	const syncBookViaAgent = async () => {
-		if (syncing) return;
-		syncing = true;
-		agentRunning = true;
-		syncErr = '';
-		syncController = new AbortController();
-		const signal = syncController.signal;
-		// Resume seeds from the saved book (never shrink); a fresh sync starts empty.
-		const resuming = bookNextPage > 1;
-		// Seed from the stored book ALWAYS, not only on resume.
-		//
-		// A fresh sync used to start from an empty map while still persisting
-		// after every batch, so the stored book briefly shrank to whatever the
-		// first batch returned — and when that batch returned nothing, it shrank
-		// to zero permanently. Seeding means the map only ever grows, which is
-		// what makes the shrink guard in persistBook safe to enforce without
-		// blocking a legitimate re-sync.
-		//
-		// Trade-off, deliberate: a client deleted in XPLAN is no longer dropped
-		// from the local book by a fresh sync. There is no delete detection here
-		// anyway, and stale extra rows are recoverable. Losing the book is not.
-		const map = new Map<string, XplanClient>(
-			book.map((c) => [c.id || c.name.toLowerCase(), c] as [string, XplanClient])
-		);
-		let navigateFirst = !resuming; // first batch of a fresh sync navigates (one search)
-		let reanchored = !resuming; // a resume may re-navigate ONCE if the tab drifted off results
-		let total = 0;
-		let noNewStreak = 0;
-		syncProgress = resuming ? 'Resuming…' : 'Starting…';
-		try {
-			for (let batch = 0; batch < MAX_BATCHES; batch++) {
-				if (signal.aborted) {
-					await persistBook(map, 2);
-					syncErr = `Stopped — ${map.size}${total ? ` of ${total}` : ''} synced. Click Resume sync to continue.`;
-					break;
-				}
-				syncProgress = `Reading${total ? ` · ${map.size} of ${total}` : ` · ${map.size} so far`}…`;
-				let res: Awaited<ReturnType<typeof gatherXplanClientBook>> | null = null;
-				let cancelled = false;
-				for (let attempt = 1; attempt <= 2 && res === null; attempt++) {
-					try {
-						res = await gatherXplanClientBook(token(), { navigateFirst, pages: PAGES_PER_BATCH }, BATCH_TIMEOUT_MS, signal);
-					} catch (e) {
-						if (e instanceof XplanCancelledError) { cancelled = true; break; }
-						res = null;
-					}
-				}
-				if (cancelled) {
-					await persistBook(map, 2);
-					syncErr = `Stopped — ${map.size}${total ? ` of ${total}` : ''} synced. Click Resume sync to continue.`;
-					break;
-				}
-				if (res === null) {
-					await persistBook(map, 2);
-					syncErr = `A batch didn’t load — ${map.size}${total ? ` of ${total}` : ''} synced. Click Sync to resume.`;
-					break;
-				}
-				if (res === 'NOT_LOGGED_IN') {
-					if (map.size === 0) syncErr = 'XPLAN isn’t connected/logged in. Open Home to connect, then sync.';
-					break;
-				}
-				// A resume whose continuation batch returns nothing means the tab
-				// drifted off the results page. Re-anchor the search ONCE (navigate
-				// next batch); dedupe-by-id absorbs the re-read overlap.
-				if (!reanchored && res.rows.length === 0 && !res.reachedEnd) {
-					navigateFirst = true;
-					reanchored = true;
-					continue;
-				}
-				// First batch failed to anchor (navigated but empty) — filter guard.
-				if (navigateFirst && res.total === 0 && res.rows.length === 0) {
-					syncErr = 'XPLAN returned an empty book — check the results filter is set to All Users, then sync again.';
-					break;
-				}
-				// CONTRACT VIOLATION — a failed read reported as a successful empty
-				// one. The playbook's outputSpec defines "no rows shown" as
-				// {"total":0,...}, so total>0 with zero rows is a state the agent is
-				// told never to produce: it read the "N to M of TOTAL" pager but not
-				// the table beneath it. This is the exact payload that emptied the
-				// book on 2026-08-21. Treat it as the failure it is, and persist
-				// nothing.
-				if (res.total > 0 && res.rows.length === 0) {
-					syncErr =
-						`XPLAN reported ${res.total} clients but the results table returned none. ` +
-						'Nothing was saved. This usually means the table had not finished loading — try again.';
-					break;
-				}
-				if (res.total) total = res.total;
-				const before = map.size;
-				for (const c of res.rows) {
-					const k = c.id || c.name.toLowerCase();
-					if (!map.has(k)) map.set(k, c);
-				}
-				const added = map.size - before;
-				// Complete only when a KNOWN total is reached, or reachedEnd is
-				// reported and no total is known to check against. A premature
-				// reachedEnd (agent misreads the pager) while short of a known total
-				// must NOT mark the book complete — it stays partial/resumable.
-				const done = (!!total && map.size >= total) || (res.reachedEnd && !total);
-				await persistBook(map, done ? 1 : 2);
-				navigateFirst = false; // every subsequent batch pages the same search
-				if (done) break;
-				if (added === 0) {
-					if (++noNewStreak >= 2) {
-						syncErr = `Sync paused — no new clients returned (${map.size}${total ? ` of ${total}` : ''}). Click Sync to try again.`;
-						break;
-					}
-				} else {
-					noNewStreak = 0;
-				}
-			}
-		} catch (e: any) {
-			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
-		} finally {
-			syncing = false;
-			agentRunning = false;
-			syncProgress = '';
-			syncController = null;
 		}
 	};
 
@@ -409,55 +198,46 @@
 				size="md"
 				title="Open the client list in XPLAN"
 			/>
-			{#if syncing && agentRunning}
+			{#if bookJob}
 				<button
-					on:click={stopSync}
-					class="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+					on:click={() => stopJob(token(), bookJob.id)}
+					class="text-xs font-medium text-red-600 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition"
 				>
-					<span class="size-2 rounded-[2px] bg-red-500"></span>
 					Stop
 				</button>
 			{/if}
 			<button
 				on:click={syncBook}
-				disabled={syncing}
-				class="inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 disabled:opacity-50 transition"
+				disabled={!!bookJob}
+				class="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50 transition"
 			>
-				{#if syncing}
-					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-					Syncing…
+				{#if bookJob}
+					{bookJob.status === 'queued' ? 'Queued…' : 'Syncing…'}
 				{:else}
 					Sync client book
 				{/if}
 			</button>
-			{#if agentFallback && !syncing}
-				<!-- The scripted read failed. The agent path is slower and cannot see
-				     into the results iframe, but it DOES navigate and re-anchor the
-				     search, so it is worth a try when the tab has drifted. -->
-				<button
-					on:click={syncBookViaAgent}
-					class="inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
-					title="Slower, uses the AI, and may return nothing on framed pages"
-				>
-					Try the agent instead
-				</button>
-			{/if}
 		</div>
 	</div>
 
 	<!-- Sync status -->
 	<p class="text-xs text-gray-400 mb-4">
-		{#if syncing && syncProgress}
-			<span>{syncProgress}</span>
-		{:else if syncErr}
-			<span class="text-red-500">{syncErr}</span>
-		{:else if book.length && bookNextPage > 1}
-			<span class="text-amber-600 dark:text-amber-400">{book.length} synced so far · partial</span> — click
-			<span class="font-medium">Sync client book</span> to read the whole book in one pass.
-		{:else if book.length}
-			{book.length} clients synced{bookSyncedAt ? ` · ${fmt(bookSyncedAt)}` : ''}. Searching your local copy.
-		{:else}
-			Client book not synced yet — click <span class="font-medium">Sync client book</span> to pull your XPLAN clients in (needs XPLAN connected on Home).
+		{#if bookJob?.progress}
+			<span class="text-gray-500">{bookJob.progress}</span>
+		{:else if lastBookSuccess}
+			<!-- Deliberately the last SUCCESS, not the last run. After a failed
+			     sync the book really is still nine days old, and saying "synced
+			     just now" because something ran would be a lie the planner acts
+			     on. -->
+			<span class="text-gray-400">Client book last synced {fmtAge(lastBookSuccess)}</span>
+		{:else if book.length === 0}
+			<span class="text-gray-400">Not synced yet</span>
+		{/if}
+		{#if syncErr}
+			<span class="text-red-600">{syncErr}</span>
+		{/if}
+		{#if $syncJobsError}
+			<span class="text-amber-600">Can’t reach axi’s job list — {$syncJobsError}</span>
 		{/if}
 	</p>
 

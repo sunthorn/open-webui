@@ -5,9 +5,7 @@ import {
 	parseBriefingItems,
 	parseClientContact,
 	parsePipeTable,
-	parseClientTasks,
-	parseBookSweep,
-	type BookSweepResult
+	parseClientTasks
 } from './playbook';
 import { buildPrompt } from './prompt';
 
@@ -39,29 +37,6 @@ describe('parseClientList (clients.search)', () => {
 	});
 	it('throws on non-JSON', () => {
 		expect(() => parseClientList('the search returned some clients')).toThrow(/unexpected format/i);
-	});
-});
-
-describe('parseBookSweep', () => {
-	it('parses total, reachedEnd and rows (name + id)', () => {
-		const raw = JSON.stringify({ total: 757, reachedEnd: false, rows: [{ name: 'Butler, Lucia', id: 715828 }, { name: 'Ng, Sam', id: '720240' }] });
-		const r = parseBookSweep(raw);
-		expect(r.total).toBe(757);
-		expect(r.reachedEnd).toBe(false);
-		expect(r.rows).toEqual([{ name: 'Butler, Lucia', id: '715828' }, { name: 'Ng, Sam', id: '720240' }]);
-	});
-	it('coerces missing/blank total to 0 and defaults reachedEnd false', () => {
-		const r = parseBookSweep(JSON.stringify({ rows: [] }));
-		expect(r.total).toBe(0);
-		expect(r.reachedEnd).toBe(false);
-		expect(r.rows).toEqual([]);
-	});
-	it('drops rows with a blank name, keeps blank id as empty string', () => {
-		const r = parseBookSweep(JSON.stringify({ total: 2, reachedEnd: true, rows: [{ name: '', id: 1 }, { name: 'A, B', id: null }] }));
-		expect(r.rows).toEqual([{ name: 'A, B', id: '' }]);
-	});
-	it('throws the standard format error on non-JSON', () => {
-		expect(() => parseBookSweep('not json')).toThrow(/unexpected format/i);
 	});
 });
 
@@ -271,26 +246,5 @@ describe('PLAYBOOK client.* entries', () => {
 		expect(url).toBe('https://sparkfg.xplan.iress.com.au/factfind/view/999999?role=client&page=super');
 		expect(op.outputFormat).toBe('lines');
 		expect(op.outputSpec).toMatch(/NONE/);
-	});
-});
-
-describe('clients.bookSweep catalog op', () => {
-	it('clients.bookSweep navigates only on the first batch, pages otherwise', () => {
-		const op = PLAYBOOK['clients.bookSweep'];
-		const urlFn = op.url as (p: Record<string, string>) => string;
-		expect(urlFn({ navigateFirst: 'true' })).toBe('https://sparkfg.xplan.iress.com.au/factfind/search/result?role=client');
-		expect(urlFn({ navigateFirst: 'false' })).toBe('');
-		expect(op.paging).toBe(true);
-		expect(op.parse).toBe(parseBookSweep);
-	});
-	it('clients.bookSweep prompt: first batch navigates + clicks Next; continuation does not navigate', () => {
-		const op = PLAYBOOK['clients.bookSweep'];
-		const first = buildPrompt(op, { navigateFirst: 'true', pages: '3' });
-		expect(first).toContain('browser_navigate once to');
-		expect(first).toMatch(/Next/);
-		expect(first).toMatch(/3 pages/);
-		const more = buildPrompt(op, { navigateFirst: 'false', pages: '3' });
-		expect(more).toMatch(/do NOT navigate/i);
-		expect(more).toMatch(/Next/);
 	});
 });

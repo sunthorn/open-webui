@@ -1,10 +1,10 @@
 import { WEBUI_BASE_URL } from '$lib/constants';
-import type { Params, XplanOperation, BookSweepResult } from './playbook';
+import type { Params, XplanOperation } from './playbook';
 import { buildPrompt } from './prompt';
 import { PLAYBOOK } from './playbook';
 import type { XplanClient, RawBriefingItem } from './playbook';
 
-export { type XplanClient, type RawBriefingItem, type BookSweepResult } from './playbook';
+export { type XplanClient, type RawBriefingItem } from './playbook';
 
 /** Thrown when XPLAN reports the browser session is not logged in. */
 export class XplanNotLoggedInError extends Error {
@@ -207,36 +207,6 @@ export const searchXplanClients = async (
 ): Promise<XplanClient[] | 'NOT_LOGGED_IN'> => {
 	try {
 		return await runOperation<XplanClient[]>({ ...PLAYBOOK['clients.search'], timeoutMs }, token, { query });
-	} catch (e) {
-		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
-		throw e;
-	}
-};
-
-// --- Client book sync -----------------------------------------------------
-// Navigate the deterministic client-results URL (which RENDERS the list — no
-// search form to operate, unlike the flaky live search) and extract the table.
-
-/**
- * Sweep ONE batch of the client book (up to `pages` pages) from a single
- * search. `navigateFirst` starts the search (navigate once); subsequent calls
- * page the same search without navigating.
- */
-export const gatherXplanClientBook = async (
-	token: string,
-	opts: { navigateFirst: boolean; pages: number },
-	timeoutMs = 150_000,
-	signal?: AbortSignal,
-	fetchFn: typeof fetch = fetch
-): Promise<BookSweepResult | 'NOT_LOGGED_IN'> => {
-	try {
-		return await runOperation<BookSweepResult>(
-			{ ...PLAYBOOK['clients.bookSweep'], timeoutMs },
-			token,
-			{ navigateFirst: opts.navigateFirst ? 'true' : 'false', pages: String(opts.pages) },
-			fetchFn,
-			signal
-		);
 	} catch (e) {
 		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
 		throw e;
