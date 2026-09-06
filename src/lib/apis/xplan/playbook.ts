@@ -1,5 +1,11 @@
 // The XPLAN operations catalog — every agent action defined as data.
 // Spec: docs/superpowers/specs/2026-07-25-xplan-integration-design.md §3.
+//
+// contact-layer/app/playbook.py is the worker's Python copy of this catalog —
+// it still carries overview.summary/briefing.gather (Task 16's Celery tasks
+// run those server-side now) alongside the client.* entries below. The two
+// files must stay in step until the deep-sync agent path (client.tasks and
+// friends, still browser-driven from this frontend copy) retires too.
 export type Params = Record<string, string>;
 export type OutputFormat = 'lines' | 'json' | 'text';
 
@@ -57,7 +63,10 @@ export const parseClientList = (raw: string): XplanClient[] => {
 		.map((c) => ({ name: String(c.entity_name).trim(), id: String(c.entity_id ?? '') }));
 };
 
-export const parseBriefingItems = (raw: string): RawBriefingItem[] => {
+// Not exported: 'briefing.gather' (its only catalog caller) moved server-side
+// in Task 16. Kept private because `parseClientTasks` below is the same
+// coercion under the name the still-browser-driven `client.tasks` op uses.
+const parseBriefingItems = (raw: string): RawBriefingItem[] => {
 	const parsed = jsonOf(raw);
 	if (!Array.isArray(parsed)) return [];
 	return parsed
@@ -156,21 +165,6 @@ export const parseClientTasks = parseBriefingItems;
 const BASE = 'https://sparkfg.xplan.iress.com.au';
 
 export const PLAYBOOK: Record<string, XplanOperation> = {
-	'overview.summary': {
-		id: 'overview.summary',
-		title: "Summarize the planner's dashboard",
-		reconDoc: 'docs/xplan-playbook/01-dashboard.md',
-		url: `${BASE}/dashboard/mainhtml`,
-		extract: [
-			'the panels visible on the Main dashboard tab — Diary (appointments),',
-			'Recent Clients, Outstanding Tasks, Client Birthday — only the panels',
-			'actually present for this planner'
-		],
-		outputFormat: 'text',
-		outputSpec: 'a SHORT plain-text summary: max 6 bullet lines, each starting with "- "',
-		parse: (raw) => raw,
-		timeoutMs: 90_000
-	},
 	'clients.search': {
 		id: 'clients.search',
 		title: 'Search clients by name',
@@ -186,17 +180,6 @@ export const PLAYBOOK: Record<string, XplanOperation> = {
 		outputFormat: 'json',
 		outputSpec: "output the page's JSON array VERBATIM, exactly as rendered, and nothing else",
 		parse: parseClientList
-	},
-	'briefing.gather': {
-		id: 'briefing.gather',
-		title: "Read today's tasks / diary / reviews",
-		reconDoc: 'docs/xplan-playbook/01-dashboard.md',
-		url: `${BASE}/dashboard/mainhtml`,
-		extract: ["the planner's TASKS, DIARY / APPOINTMENTS and REVIEWS visible on the page"],
-		outputFormat: 'json',
-		outputSpec:
-			'a JSON array of items, each {"title":"...","client":"name or empty","dueAt":"YYYY-MM-DD or empty","time":"HH:MM or empty","done":false,"detail":""}. Dates on the page are DD/MM/YYYY — convert to YYYY-MM-DD in dueAt. If none visible: []',
-		parse: parseBriefingItems
 	},
 	'client.contact': {
 		id: 'client.contact',

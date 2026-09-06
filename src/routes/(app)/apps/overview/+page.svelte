@@ -6,22 +6,15 @@
 	//   • Refresh briefing / Sync dashboard — spend tokens; explicit, ~1–2×/day.
 	import { onMount, onDestroy } from 'svelte';
 	import {
-		syncXplanOverview,
-		gatherXplanBriefing,
-		computeBriefing,
-		XplanCancelledError
-	} from '$lib/apis/xplan';
-	import {
 		getOverviewSnapshot,
-		saveOverviewSnapshot,
 		getXplanAccess,
 		getXplanStatus,
 		getBriefing,
-		saveBriefing,
 		type XplanAccessLevel,
 		type DailyBriefing,
 		type BriefingItem
 	} from '$lib/apis/gateway';
+	import { syncJobs, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	let greeting = 'Hello';
@@ -45,21 +38,10 @@
 
 	// --- briefing (live) ---
 	let briefing: DailyBriefing | null = null;
-	let briefingState: 'idle' | 'loading' | 'error' = 'idle';
-	let briefingErr = '';
 
 	// --- dashboard read (sync) ---
-	let syncState: 'idle' | 'loading' | 'done' | 'error' = 'idle';
 	let lines: string[] = [];
 	let syncedAt = '';
-	let syncErr = '';
-
-	// Stop controls — each agent read can be aborted mid-flight.
-	let syncCtrl: AbortController | null = null;
-	let briefCtrl: AbortController | null = null;
-	const stopSync = () => syncCtrl?.abort();
-	const stopBriefing = () => briefCtrl?.abort();
-
 
 	// Full timestamp: dd/mm/yy hh:mm (24h).
 	const fmt = (iso: string) => {
@@ -108,28 +90,36 @@
 		if (document.visibilityState === 'visible') checkConnection();
 	};
 
+	// Restore the saved briefing (free — our own store).
+	const loadBriefing = async () => {
+		try {
+			briefing = await getBriefing(token());
+		} catch (e) {
+			console.warn('Could not load briefing:', e);
+		}
+	};
+
+	// Restore the saved dashboard read (free — our own store).
+	const loadSnapshot = async () => {
+		try {
+			const snap = await getOverviewSnapshot(token());
+			if (snap) {
+				lines = snap.lines ?? [];
+				syncedAt = snap.syncedAt ?? '';
+			}
+		} catch (e) {
+			console.warn('Could not load overview snapshot:', e);
+		}
+	};
+
 	onMount(async () => {
 		const now = new Date();
 		const h = now.getHours();
 		greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 		today = now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
-		// Restore saved briefing + dashboard read (free — our own store).
-		try {
-			briefing = await getBriefing(token());
-		} catch (e) {
-			console.warn('Could not load briefing:', e);
-		}
-		try {
-			const snap = await getOverviewSnapshot(token());
-			if (snap) {
-				lines = snap.lines ?? [];
-				syncedAt = snap.syncedAt ?? '';
-				if (lines.length) syncState = 'done';
-			}
-		} catch (e) {
-			console.warn('Could not load overview snapshot:', e);
-		}
+		await loadBriefing();
+		await loadSnapshot();
 
 		await checkConnection();
 
@@ -145,70 +135,24 @@
 		window.removeEventListener('focus', onFocus);
 	});
 
-	// SPENDS TOKENS — live-read today's tasks/diary and rebuild the briefing.
-	const refreshBriefing = async () => {
-		briefingState = 'loading';
-		briefingErr = '';
-		briefCtrl = new AbortController();
-		try {
-			const t = token();
-			const raw = await gatherXplanBriefing(t, 120_000, briefCtrl.signal);
-			if (raw === 'NOT_LOGGED_IN') {
-				loggedIn = false;
-				briefingState = 'idle';
-				return;
-			}
-			briefing = computeBriefing(raw);
-			await saveBriefing(t, briefing);
-			briefingState = 'idle';
-		} catch (e: any) {
-			if (e instanceof XplanCancelledError) {
-				briefingState = 'idle'; // clean stop, not an error
-				return;
-			}
-			briefingErr = typeof e === 'string' ? e : (e?.message ?? 'Refresh failed');
-			briefingState = 'error';
-		} finally {
-			briefCtrl = null;
-		}
-	};
+	// Both syncs run on axi's worker now — these just ask for one.
+	const syncOverview = () => startJob(token(), 'overview');
+	const refreshBriefing = () => startJob(token(), 'briefing');
 
-	// SPENDS TOKENS — raw dashboard summary.
-	const syncDashboard = async () => {
-		syncState = 'loading';
-		syncErr = '';
-		syncCtrl = new AbortController();
-		try {
-			const t = token();
-			const summary = await syncXplanOverview(t, 90_000, syncCtrl.signal);
-			if (summary.includes('NOT_LOGGED_IN')) {
-				loggedIn = false;
-				lines = [];
-				syncState = 'idle';
-				return;
-			}
-			lines = summary
-				.split('\n')
-				.map((l) => l.replace(/^[-•*]\s*/, '').trim())
-				.filter((l) => l.length > 0);
-			syncedAt = new Date().toISOString();
-			syncState = 'done';
-			try {
-				await saveOverviewSnapshot(t, { lines, notLoggedIn: false, syncedAt });
-			} catch (e) {
-				console.warn('Could not save overview snapshot:', e);
-			}
-		} catch (e: any) {
-			if (e instanceof XplanCancelledError) {
-				syncState = lines.length ? 'done' : 'idle'; // clean stop
-				return;
-			}
-			syncErr = typeof e === 'string' ? e : (e?.message ?? 'Sync failed');
-			syncState = 'error';
-		} finally {
-			syncCtrl = null;
-		}
-	};
+	$: overviewJob = runningJob($syncJobs, 'overview');
+	$: briefingJob = runningJob($syncJobs, 'briefing');
+
+	let seenOverviewRun = '';
+	$: if ($syncJobs.last.overview && $syncJobs.last.overview.id !== seenOverviewRun) {
+		seenOverviewRun = $syncJobs.last.overview.id;
+		if ($syncJobs.last.overview.status === 'done') void loadSnapshot();
+	}
+
+	let seenBriefingRun = '';
+	$: if ($syncJobs.last.briefing && $syncJobs.last.briefing.id !== seenBriefingRun) {
+		seenBriefingRun = $syncJobs.last.briefing.id;
+		if ($syncJobs.last.briefing.status === 'done') void loadBriefing();
+	}
 </script>
 
 <div class="max-w-3xl mx-auto px-8 py-10">
@@ -234,9 +178,9 @@
 					{#if syncedAt}<span class="text-xs text-gray-400">{fmt(syncedAt)}</span>{/if}
 					<!-- Check the source: the real XPLAN dashboard. -->
 					<XplanLink path="/dashboard/mainhtml" label="Dashboard" title="Open the XPLAN dashboard" />
-					{#if syncState === 'loading'}
+					{#if overviewJob}
 						<button
-							on:click={stopSync}
+							on:click={() => stopJob(token(), overviewJob.id)}
 							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
 						>
 							<span class="size-2 rounded-[2px] bg-red-500"></span>
@@ -245,13 +189,12 @@
 					{/if}
 					{#if canSync}
 						<button
-							on:click={syncDashboard}
-							disabled={syncState === 'loading'}
+							on:click={syncOverview}
+							disabled={!!overviewJob}
 							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 disabled:opacity-50 disabled:cursor-wait transition"
 						>
-							{#if syncState === 'loading'}
-								<svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-								Reading…
+							{#if overviewJob}
+								{overviewJob.status === 'queued' ? 'Queued…' : 'Reading…'}
 							{:else}
 								{lines.length ? 'Resync' : 'Sync'}
 							{/if}
@@ -259,9 +202,7 @@
 					{/if}
 				</div>
 			</div>
-			{#if syncState === 'error'}
-				<p class="text-sm text-red-600 dark:text-red-400">{syncErr}</p>
-			{:else if lines.length}
+			{#if lines.length}
 				<ul class="space-y-2">
 					{#each lines as line}
 						<li class="flex items-start gap-2.5 text-sm">
@@ -289,9 +230,9 @@
 					     /xtasks/framelist/todo is XPLAN's own "Full list" of tasks. -->
 					<XplanLink path="/xtasks/framelist/todo" label="Tasks" title="Open your XPLAN task list" />
 					<XplanLink path="/diary/search?choice=my" label="Diary" title="Open your XPLAN diary" />
-					{#if briefingState === 'loading'}
+					{#if briefingJob}
 						<button
-							on:click={stopBriefing}
+							on:click={() => stopJob(token(), briefingJob.id)}
 							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
 						>
 							<span class="size-2 rounded-[2px] bg-red-500"></span>
@@ -301,12 +242,11 @@
 					{#if canSync}
 						<button
 							on:click={refreshBriefing}
-							disabled={briefingState === 'loading'}
+							disabled={!!briefingJob}
 							class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 disabled:cursor-wait transition"
 						>
-							{#if briefingState === 'loading'}
-								<svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-								Reading…
+							{#if briefingJob}
+								{briefingJob.status === 'queued' ? 'Queued…' : 'Reading…'}
 							{:else}
 								Refresh from XPLAN
 							{/if}
@@ -315,9 +255,7 @@
 				</div>
 			</div>
 
-			{#if briefingState === 'error'}
-				<p class="text-sm text-red-600 dark:text-red-400">{briefingErr}</p>
-			{:else if briefingEmpty}
+			{#if briefingEmpty}
 				<p class="text-sm text-gray-500">
 					No agenda yet. Click <span class="font-medium">Refresh from XPLAN</span> to read today's tasks and diary.
 				</p>

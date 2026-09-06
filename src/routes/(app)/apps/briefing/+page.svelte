@@ -3,8 +3,8 @@
 	// document through the contact-layer gateway (built overnight by hermes; for
 	// now it may be manually seeded). Slice: Phase 4 walking skeleton.
 	import { onMount } from 'svelte';
-	import { getBriefing, saveBriefing, type DailyBriefing, type BriefingItem } from '$lib/apis/gateway';
-	import { gatherXplanBriefing, computeBriefing, XplanCancelledError } from '$lib/apis/xplan';
+	import { getBriefing, type DailyBriefing, type BriefingItem } from '$lib/apis/gateway';
+	import { syncJobs, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	type State = 'loading' | 'empty' | 'error' | 'ready';
@@ -12,14 +12,9 @@
 	let errorMsg = '';
 	let briefing: DailyBriefing | null = null;
 	let greeting = 'Hello';
+	let err = '';
 
-	// Live refresh (spends tokens) — reads today's tasks/diary from XPLAN and
-	// rebuilds the briefing, vs the initial mount which just reads the stored one.
-	let refreshing = false;
-	let refreshErr = '';
-	let notLoggedIn = false;
-	let refreshCtrl: AbortController | null = null;
-	const stopRefresh = () => refreshCtrl?.abort();
+	const token = () => localStorage.getItem('token') ?? '';
 
 	$: sections = briefing
 		? [
@@ -42,8 +37,7 @@
 		state = 'loading';
 		errorMsg = '';
 		try {
-			const token = localStorage.getItem('token') ?? '';
-			briefing = await getBriefing(token);
+			briefing = await getBriefing(token());
 			state = briefing ? 'ready' : 'empty';
 		} catch (e: any) {
 			errorMsg = typeof e === 'string' ? e : (e?.message ?? 'Could not load briefing');
@@ -51,32 +45,27 @@
 		}
 	};
 
-	// SPENDS TOKENS — pull a fresh briefing live from XPLAN (needs XPLAN connected
-	// on Home). Stoppable mid-read.
+	// The refresh runs on axi's worker. This used to be a ~120s agent call
+	// held by this component: navigating away kept the call alive but threw
+	// away the spinner, the Stop button and any record that it happened.
 	const refresh = async () => {
-		if (refreshing) return;
-		refreshing = true;
-		refreshErr = '';
-		notLoggedIn = false;
-		refreshCtrl = new AbortController();
-		try {
-			const token = localStorage.getItem('token') ?? '';
-			const raw = await gatherXplanBriefing(token, 120_000, refreshCtrl.signal);
-			if (raw === 'NOT_LOGGED_IN') {
-				notLoggedIn = true;
-				return;
-			}
-			briefing = computeBriefing(raw);
-			await saveBriefing(token, briefing);
-			state = 'ready';
-		} catch (e: any) {
-			if (e instanceof XplanCancelledError) return; // clean stop, not an error
-			refreshErr = typeof e === 'string' ? e : (e?.message ?? 'Refresh failed');
-		} finally {
-			refreshing = false;
-			refreshCtrl = null;
-		}
+		err = '';
+		await startJob(token(), 'briefing');
 	};
+
+	$: briefingJob = runningJob($syncJobs, 'briefing');
+	$: lastBriefingRun = $syncJobs.last.briefing;
+
+	// Reload when a run finishes — the worker wrote briefing:daily, so this is
+	// a plain re-read of the same key the page already loads on mount.
+	let seenBriefingRun = '';
+	$: if (lastBriefingRun && lastBriefingRun.id !== seenBriefingRun) {
+		seenBriefingRun = lastBriefingRun.id;
+		if (lastBriefingRun.status === 'done') void load();
+		// `skipped` is not a failure of the data — it means we did not look,
+		// and the fix is signing in, not refreshing again.
+		else if (lastBriefingRun.status !== 'cancelled') err = lastBriefingRun.error ?? '';
+	}
 
 	onMount(() => {
 		const h = new Date().getHours();
@@ -106,23 +95,21 @@
 			<!-- Check the source: the briefing is built from tasks + diary. -->
 			<XplanLink path="/xtasks/framelist/todo" label="Tasks" size="md" title="Open your XPLAN task list" />
 			<XplanLink path="/diary/search?choice=my" label="Diary" size="md" title="Open your XPLAN diary" />
-			{#if refreshing}
+			{#if briefingJob}
 				<button
-					on:click={stopRefresh}
-					class="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition"
+					on:click={() => stopJob(token(), briefingJob.id)}
+					class="text-xs font-medium text-red-600 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition"
 				>
-					<span class="size-2 rounded-[2px] bg-red-500"></span>
 					Stop
 				</button>
 			{/if}
 			<button
 				on:click={refresh}
-				disabled={refreshing || state === 'loading'}
-				class="inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 transition"
+				disabled={!!briefingJob || state === 'loading'}
+				class="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50 transition"
 			>
-				{#if refreshing}
-					<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-					Reading…
+				{#if briefingJob}
+					{briefingJob.status === 'queued' ? 'Queued…' : 'Refreshing…'}
 				{:else}
 					Refresh from XPLAN
 				{/if}
@@ -130,14 +117,9 @@
 		</div>
 	</div>
 
-	{#if notLoggedIn}
-		<div class="mb-5 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-3">
-			XPLAN not connected — open <span class="font-medium">Home</span> and connect first, then refresh.
-		</div>
-	{/if}
-	{#if refreshErr}
+	{#if err}
 		<div class="mb-5 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">
-			{refreshErr}
+			{err}
 		</div>
 	{/if}
 

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
 	PLAYBOOK,
 	parseClientList,
-	parseBriefingItems,
 	parseClientContact,
 	parsePipeTable,
 	parseClientTasks
@@ -40,29 +39,12 @@ describe('parseClientList (clients.search)', () => {
 	});
 });
 
-describe('parseBriefingItems (briefing.gather)', () => {
-	it('coerces items and drops untitled ones', () => {
-		const raw = JSON.stringify([
-			{ title: 'Review meeting', client: 'Testperson, Alex', dueAt: '2026-07-25', time: '10:00', done: false, detail: '' },
-			{ title: '' },
-			null
-		]);
-		const out = parseBriefingItems(raw);
-		expect(out).toHaveLength(1);
-		expect(out[0].title).toBe('Review meeting');
-	});
-	it('throws on non-JSON', () => {
-		expect(() => parseBriefingItems('no tasks visible')).toThrow(/unexpected format/i);
-	});
-});
-
 describe('PLAYBOOK migrated entries', () => {
-	it('has the four migrated operations', () => {
-		for (const id of ['overview.summary', 'clients.search', 'briefing.gather']) {
-			expect(PLAYBOOK[id], id).toBeDefined();
-			expect(PLAYBOOK[id].id).toBe(id);
-			expect(PLAYBOOK[id].reconDoc).toMatch(/^docs\/xplan-playbook\//);
-		}
+	it('has the migrated clients.search operation', () => {
+		const op = PLAYBOOK['clients.search'];
+		expect(op).toBeDefined();
+		expect(op.id).toBe('clients.search');
+		expect(op.reconDoc).toMatch(/^docs\/xplan-playbook\//);
 	});
 
 	it('clients.search builds a deterministic quicksearch URL with no navHints', () => {
@@ -84,12 +66,6 @@ describe('PLAYBOOK migrated entries', () => {
 		// The injected "roles.0=user" must stay encoded — only the legitimate
 		// trailing "&roles.0=client" param should appear as a real querystring key.
 		expect(url.match(/(?:^|&)roles\.0=[^&]*/g)).toEqual(['&roles.0=client']);
-	});
-
-	it('briefing.gather outputSpec documents the DD/MM/YYYY -> YYYY-MM-DD conversion', () => {
-		const op = PLAYBOOK['briefing.gather'];
-		expect(op.outputSpec).toMatch(/DD\/MM\/YYYY/);
-		expect(op.outputSpec).toMatch(/YYYY-MM-DD/);
 	});
 });
 

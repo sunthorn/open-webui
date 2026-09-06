@@ -1,5 +1,9 @@
 // Renders hermes prompts from catalog entries. The safety rails live HERE,
 // once — no catalog entry can forget them.
+//
+// contact-layer/app/prompt.py is the worker's Python copy — it must stay in
+// step with this file until the deep-sync agent path (runOperation and the
+// client.* catalog, still browser-driven from here) retires too.
 import type { Params, XplanOperation } from './playbook';
 
 /** Strip characters that could break out of the prompt template. */

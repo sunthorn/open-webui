@@ -2,8 +2,12 @@ import { WEBUI_BASE_URL } from '$lib/constants';
 import type { Params, XplanOperation } from './playbook';
 import { buildPrompt } from './prompt';
 import { PLAYBOOK } from './playbook';
-import type { XplanClient, RawBriefingItem } from './playbook';
+import type { XplanClient } from './playbook';
 
+// RawBriefingItem stays re-exported (not imported above) — computeBriefing/
+// gatherXplanBriefing, its only users here, are gone, but the client detail
+// page's deep-sync path (client.tasks) still imports the type from this
+// barrel.
 export { type XplanClient, type RawBriefingItem } from './playbook';
 
 /** Thrown when XPLAN reports the browser session is not logged in. */
@@ -171,27 +175,6 @@ export interface PlannerOverview {
 	todos: PlannerTodo[];
 }
 
-/**
- * Ask hermes to read the planner's live XPLAN dashboard and return a short
- * summary. Routes through Open WebUI's own /api/chat/completions proxy, so the
- * hermes API key never reaches the browser.
- *
- * @returns the summary text (may be `NOT_LOGGED_IN`)
- * @throws on transport / backend error
- */
-export const syncXplanOverview = async (
-	token: string,
-	timeoutMs = 90_000,
-	signal?: AbortSignal
-): Promise<string> => {
-	try {
-		return await runOperation<string>({ ...PLAYBOOK['overview.summary'], timeoutMs }, token, {}, fetch, signal);
-	} catch (e) {
-		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
-		throw e;
-	}
-};
-
 // --- Live client search ---------------------------------------------------
 // Search the planner's real XPLAN client book (via hermes) and return matches.
 // Token-spending + browser-driven, so it's an explicit action, not per-keystroke.
@@ -213,98 +196,3 @@ export const searchXplanClients = async (
 	}
 };
 
-// --- Live briefing (Build B) ----------------------------------------------
-// Gather today's real tasks/diary from the logged-in XPLAN (via hermes), then
-// bucket into horizons (ported from scripts/build-briefing.py compute()). This
-// replaces the sample data with a live, planner-triggered read.
-
-import type { DailyBriefing, BriefingItem } from '$lib/apis/gateway';
-
-const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-const parseDue = (s?: string): Date | null => {
-	if (!s) return null;
-	const d = new Date(s + 'T00:00:00');
-	return isNaN(d.getTime()) ? null : d;
-};
-
-/** Friendly dueAt label, mirroring the Python builder's _item(). */
-const dueLabel = (due: Date | null, time: string | undefined, status: string, today: Date): string => {
-	if (time && due && dayKey(due) === dayKey(today)) return time;
-	if (status === 'overdue' && due) {
-		const days = Math.round((today.getTime() - due.getTime()) / 86400000);
-		return `${days}d ago`;
-	}
-	if (due) return due.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
-	return '';
-};
-
-/** Bucket raw items into needsAttention / today / tomorrow / next7. */
-export const computeBriefing = (raw: RawBriefingItem[], today = new Date()): DailyBriefing => {
-	const needs: BriefingItem[] = [];
-	const todayB: BriefingItem[] = [];
-	const tomorrowB: BriefingItem[] = [];
-	const next7: BriefingItem[] = [];
-	const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-	const mk = (r: RawBriefingItem, status: BriefingItem['status'], i: number, due: Date | null): BriefingItem => {
-		const item: BriefingItem = {
-			id: `xplan:${i}`,
-			title: r.title,
-			status,
-			source: 'xplan',
-			dueAt: dueLabel(due, r.time, status, t0)
-		};
-		if (r.client) item.client = r.client;
-		if (r.detail) item.detail = r.detail;
-		return item;
-	};
-
-	raw.forEach((r, i) => {
-		const due = parseDue(r.dueAt);
-		if (!due) {
-			// Undated items still matter — surface them under today.
-			todayB.push(mk(r, 'due', i, null));
-			return;
-		}
-		const diff = Math.round((due.getTime() - t0.getTime()) / 86400000);
-		if (r.done && diff === 0) todayB.push(mk(r, 'done', i, due));
-		else if (diff < 0 && !r.done) {
-			if (diff >= -7) needs.push(mk(r, 'overdue', i, due)); // roll forward ≤7 days
-		} else if (diff === 0) todayB.push(mk(r, 'due', i, due));
-		else if (diff === 1) tomorrowB.push(mk(r, 'upcoming', i, due));
-		else if (diff > 1 && diff <= 7) next7.push(mk(r, 'upcoming', i, due));
-	});
-
-	return {
-		owner: '', // the gateway keys the row by the authenticated owner
-		compiledAt: new Date().toISOString(),
-		sources: ['xplan'],
-		needsAttention: needs,
-		today: todayB,
-		tomorrow: tomorrowB,
-		next7
-	};
-};
-
-/**
- * Read today's tasks/diary live from XPLAN via hermes and return raw items.
- * @returns raw items (possibly empty), or throws; special value 'NOT_LOGGED_IN'.
- */
-export const gatherXplanBriefing = async (
-	token: string,
-	timeoutMs = 120_000,
-	signal?: AbortSignal
-): Promise<RawBriefingItem[] | 'NOT_LOGGED_IN'> => {
-	try {
-		return await runOperation<RawBriefingItem[]>(
-			{ ...PLAYBOOK['briefing.gather'], timeoutMs },
-			token,
-			{},
-			fetch,
-			signal
-		);
-	} catch (e) {
-		if (e instanceof XplanNotLoggedInError) return 'NOT_LOGGED_IN';
-		throw e;
-	}
-};
