@@ -109,7 +109,7 @@
 			{:else}
 				<!-- axi fork: the per-model avatar row and the model name that used to
 				     head this screen are gone — there is only one model here and the
-				     planner never chooses it, so announcing "hermes-agent" told them
+				     planner never chooses it, so announcing the model name told them
 				     nothing. The app logo stays (static /favicon.png, not the model's
 				     profile image) beside a greeting for the signed-in user. -->
 				<div class="flex flex-row justify-center items-center gap-2.5 @sm:gap-3 w-fit px-5 max-w-xl">

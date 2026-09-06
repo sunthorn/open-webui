@@ -118,7 +118,9 @@ export const runOperation = async <T = unknown>(
 			method: 'POST',
 			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({
-				model: 'hermes-agent',
+				// Must match API_SERVER_MODEL_NAME on hermes-backend — hermes
+				// advertises exactly one model and OWUI routes by this id.
+				model: 'axi',
 				messages: [{ role: 'user', content: buildPrompt(op, params) }],
 				stream: false
 			}),

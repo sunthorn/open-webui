@@ -25,7 +25,7 @@ describe('runOperation', () => {
 		const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toContain('/openai/chat/completions');
 		const body = JSON.parse(String(init.body));
-		expect(body.model).toBe('hermes-agent');
+		expect(body.model).toBe('axi');
 		expect(body.messages[0].content).toContain('Do EXACTLY this and nothing more');
 		expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
 	});

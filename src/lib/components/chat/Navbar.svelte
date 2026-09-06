@@ -48,7 +48,7 @@
 	export let history;
 	export let selectedModels;
 	// axi fork: default flipped to false. This is an in-house tool for talking to
-	// the practice's own data, and only hermes-agent can reach it — every other
+	// the practice's own data, and only the axi agent can reach it — every other
 	// entry in the picker was a plain LLM that answers about client records by
 	// guessing. DEFAULT_MODELS in docker-compose.yml pins the selection instead.
 	export let showModelSelector = false;
