@@ -24,8 +24,6 @@
 	import { goto } from '$app/navigation';
 	import { activeClient } from '$lib/apps/activeClient';
 	import {
-		GatewayError,
-		deepSyncClient,
 		getClientDetail,
 		getOutput,
 		putOutput,
@@ -49,6 +47,7 @@
 		type ClientSection,
 		type ClientSectionName
 	} from '$lib/apis/xplan/deepSync';
+	import { syncJobs, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 
 	const FRESH_DAYS = 7;
 
@@ -143,7 +142,6 @@
 	// null until the first load resolves — "not in the synced book" and "not
 	// loaded yet" must not look the same.
 	let inBook: boolean | null = null;
-	let scriptedRunning = false;
 	let scriptedMsg = '';
 	let scriptedErr = '';
 	// A 503 is the XPLAN session, not a fault in axi. The fix is "sign in
@@ -169,34 +167,42 @@
 	 * afterwards is what puts the fresh values on screen.
 	 */
 	const scriptedSync = async () => {
-		if (!client || !hasXplanId || scriptedRunning) return;
-		scriptedRunning = true;
+		if (!client || !hasXplanId) return;
 		scriptedMsg = '';
 		scriptedErr = '';
 		sessionExpired = false;
-		try {
-			const r = await deepSyncClient(token(), client.id);
-			await loadStore();
-			const parts = [`Read ${r.sectionsRead} pages`, `stored ${r.sectionsStored}`];
-			if (r.storeFailures) parts.push(`${r.storeFailures} failed to store`);
-			if (r.idsUsed.length > 1) parts.push(`covered the household (${r.idsUsed.join(', ')})`);
-			if (r.missingPanels.length)
-				parts.push(
-					`${r.missingPanels.length} page${r.missingPanels.length === 1 ? '' : 's'} were missing a panel the map expects — check those values`
-				);
-			scriptedMsg = parts.join(' · ') + '.';
-		} catch (e) {
-			if (e instanceof GatewayError && e.status === 503) sessionExpired = true;
-			else if (e instanceof GatewayError && e.status === 403)
-				scriptedErr = 'XPLAN access is set to Lock. Switch it to Read-only or Full on Home, then sync.';
-			else if (e instanceof GatewayError && e.status === 404)
-				scriptedErr =
-					'This client is not in the synced book yet — run “Sync client book” on the Clients page first.';
-			else scriptedErr = e instanceof Error ? e.message : String(e);
-		} finally {
-			scriptedRunning = false;
-		}
+		await startJob(token(), 'deep_sync', { clientId: client.id });
 	};
+
+	$: deepJob = client ? runningJob($syncJobs, 'deep_sync', client.id) : undefined;
+	$: lastDeepRun = $syncJobs.last.deep_sync;
+
+	// When a run for THIS client finishes, re-read the store. The worker wrote
+	// the sections server-side; loadStore() is what puts them on screen.
+	let seenDeepRun = '';
+	$: if (
+		lastDeepRun &&
+		lastDeepRun.id !== seenDeepRun &&
+		lastDeepRun.params?.clientId === client?.id
+	) {
+		seenDeepRun = lastDeepRun.id;
+		void loadStore();
+		if (lastDeepRun.status === 'done') {
+			scriptedMsg = 'Read every scripted page.';
+		} else if (lastDeepRun.status === 'skipped') {
+			// "We did not look" — the fix is signing in or unlocking access,
+			// never re-running against the same closed door.
+			sessionExpired = /sign in/i.test(lastDeepRun.error ?? '');
+			if (!sessionExpired) scriptedErr = lastDeepRun.error ?? 'XPLAN access is locked.';
+		} else if (lastDeepRun.status === 'error') {
+			scriptedErr =
+				lastDeepRun.error === 'client not in the synced book'
+					? 'This client is not in the synced book yet — run “Sync client book” on the Clients page first.'
+					: (lastDeepRun.error ?? 'The sync failed.');
+		} else if (lastDeepRun.status === 'cancelled') {
+			scriptedMsg = lastDeepRun.error ?? 'Stopped. Whatever was read is saved.';
+		}
+	}
 
 	// Column order comes from the section's OWN headers; rows are header-keyed
 	// objects ({"Description": "Home"}), never positional arrays. Falling back
@@ -384,16 +390,26 @@
 				</div>
 				<button
 					on:click={scriptedSync}
-					disabled={scriptedRunning}
-					class="shrink-0 inline-flex items-center gap-2 text-sm font-medium px-3.5 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-50 disabled:cursor-wait transition"
+					disabled={!!deepJob || !hasXplanId}
+					class="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50 transition"
 				>
-					{#if scriptedRunning}
-						<svg class="size-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-						Reading 23 pages…
+					{#if deepJob}
+						{deepJob.status === 'queued' ? 'Queued…' : 'Reading…'}
 					{:else}
 						{sections.length ? 'Re-read from XPLAN' : 'Read from XPLAN'}
 					{/if}
 				</button>
+				{#if deepJob}
+					<button
+						on:click={() => stopJob(token(), deepJob.id)}
+						class="text-xs font-medium text-red-600 hover:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition"
+					>
+						Stop
+					</button>
+					{#if deepJob.progress}
+						<span class="text-xs text-gray-500">{deepJob.progress}</span>
+					{/if}
+				{/if}
 			</div>
 
 			{#if sessionExpired}
