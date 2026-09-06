@@ -110,6 +110,8 @@ export interface XplanStatus {
 	browserUp: boolean;
 	loggedIn: boolean | null; // null = browser up but can't tell (no XPLAN tab)
 	tabUrl?: string | null;
+	/** Whether the host caretaker answers /health. Absent on an older gateway. */
+	helper?: 'running' | 'not-installed';
 }
 
 export const getXplanStatus = async (token: string): Promise<XplanStatus> => {

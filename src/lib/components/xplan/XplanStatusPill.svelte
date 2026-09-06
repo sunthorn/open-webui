@@ -22,6 +22,7 @@
 	let level: XplanAccessLevel = 'readonly';
 	let browserUp = false;
 	let loggedIn: boolean | null = null;
+	let helper: 'running' | 'not-installed' | undefined;
 	let probed = false;
 	// The gateway itself is unreachable (network/CORS/auth), as opposed to
 	// reachable-but-reporting-a-problem. Tracked separately so the pill can say
@@ -37,7 +38,7 @@
 		: !probed
 		? 'checking'
 		: !browserUp
-			? 'browser-down'
+			? helper === 'not-installed' ? 'no-helper' : 'browser-down'
 			: loggedIn !== true
 				? 'signin'
 				: level === 'lock'
@@ -48,6 +49,7 @@
 		checking: 'Checking…',
 		unreachable: "Can't reach axi",
 		'browser-down': 'Browser not running',
+		'no-helper': 'Helper not installed',
 		signin: 'Sign in to XPLAN',
 		locked: 'Locked',
 		connected: `Connected · ${accessMeta(level).label}`
@@ -57,6 +59,7 @@
 		checking: 'bg-gray-400',
 		unreachable: 'bg-red-500',
 		'browser-down': 'bg-red-500',
+		'no-helper': 'bg-amber-500',
 		signin: 'bg-amber-500',
 		locked: 'bg-amber-500',
 		connected: 'bg-green-500'
@@ -70,6 +73,7 @@
 			]);
 			browserUp = !!s.browserUp;
 			loggedIn = s.loggedIn;
+			helper = s.helper;
 			level = lvl;
 			probed = true;
 			unreachable = false;
