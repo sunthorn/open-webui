@@ -10,7 +10,7 @@
 //
 // Keeping it relative also means contact-layer needs no published host port:
 // the only way to reach XPLAN is through axi, which is the rule we want.
-const gatewayUrl = () => '';
+export const gatewayUrl = () => '';
 
 /** A failed gateway call, carrying the status so callers can branch on it. */
 export class GatewayError extends Error {
@@ -35,7 +35,7 @@ export class GatewayError extends Error {
  * no next step. Dig out the message; fall back to the status code, never to
  * a stringified object.
  */
-const gatewayError = async (res: Response): Promise<GatewayError> => {
+export const gatewayError = async (res: Response): Promise<GatewayError> => {
 	const body: any = await res.json().catch(() => ({}));
 	const d = body?.detail;
 	const text =
