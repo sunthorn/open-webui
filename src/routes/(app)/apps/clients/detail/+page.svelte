@@ -21,6 +21,7 @@
 	//
 	// Both are READS. Nothing on this page writes to XPLAN.
 	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 	import { activeClient } from '$lib/apps/activeClient';
 	import {
@@ -47,7 +48,7 @@
 		type ClientSection,
 		type ClientSectionName
 	} from '$lib/apis/xplan/deepSync';
-	import { syncJobs, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
+	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 
 	const FRESH_DAYS = 7;
 
@@ -171,7 +172,8 @@
 		scriptedMsg = '';
 		scriptedErr = '';
 		sessionExpired = false;
-		await startJob(token(), 'deep_sync', { clientId: client.id });
+		const started = await startJob(token(), 'deep_sync', { clientId: client.id });
+		if (!started) scriptedErr = get(syncJobsError) ?? 'Could not start the read.';
 	};
 
 	$: deepJob = client ? runningJob($syncJobs, 'deep_sync', client.id) : undefined;

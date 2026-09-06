@@ -5,6 +5,7 @@
 	//   • Check connection — FREE (gateway probes the debug Chrome, no LLM).
 	//   • Refresh briefing / Sync dashboard — spend tokens; explicit, ~1–2×/day.
 	import { onMount, onDestroy } from 'svelte';
+	import { get } from 'svelte/store';
 	import {
 		getOverviewSnapshot,
 		getXplanAccess,
@@ -14,7 +15,7 @@
 		type DailyBriefing,
 		type BriefingItem
 	} from '$lib/apis/gateway';
-	import { syncJobs, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
+	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	let greeting = 'Hello';
@@ -138,13 +139,15 @@
 	// Both syncs run on axi's worker now — these just ask for one.
 	let overviewErr = '';
 	let briefingErr = '';
-	const syncOverview = () => {
+	const syncOverview = async () => {
 		overviewErr = '';
-		void startJob(token(), 'overview');
+		const started = await startJob(token(), 'overview');
+		if (!started) overviewErr = get(syncJobsError) ?? 'Could not start the sync.';
 	};
-	const refreshBriefing = () => {
+	const refreshBriefing = async () => {
 		briefingErr = '';
-		void startJob(token(), 'briefing');
+		const started = await startJob(token(), 'briefing');
+		if (!started) briefingErr = get(syncJobsError) ?? 'Could not start the refresh.';
 	};
 
 	$: overviewJob = runningJob($syncJobs, 'overview');

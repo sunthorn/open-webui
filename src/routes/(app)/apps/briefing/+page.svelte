@@ -3,8 +3,9 @@
 	// document through the contact-layer gateway (built overnight by hermes; for
 	// now it may be manually seeded). Slice: Phase 4 walking skeleton.
 	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
 	import { getBriefing, type DailyBriefing, type BriefingItem } from '$lib/apis/gateway';
-	import { syncJobs, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
+	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	type State = 'loading' | 'empty' | 'error' | 'ready';
@@ -50,7 +51,8 @@
 	// away the spinner, the Stop button and any record that it happened.
 	const refresh = async () => {
 		err = '';
-		await startJob(token(), 'briefing');
+		const started = await startJob(token(), 'briefing');
+		if (!started) err = get(syncJobsError) ?? 'Could not start the refresh.';
 	};
 
 	$: briefingJob = runningJob($syncJobs, 'briefing');
