@@ -136,8 +136,16 @@
 	});
 
 	// Both syncs run on axi's worker now — these just ask for one.
-	const syncOverview = () => startJob(token(), 'overview');
-	const refreshBriefing = () => startJob(token(), 'briefing');
+	let overviewErr = '';
+	let briefingErr = '';
+	const syncOverview = () => {
+		overviewErr = '';
+		void startJob(token(), 'overview');
+	};
+	const refreshBriefing = () => {
+		briefingErr = '';
+		void startJob(token(), 'briefing');
+	};
 
 	$: overviewJob = runningJob($syncJobs, 'overview');
 	$: briefingJob = runningJob($syncJobs, 'briefing');
@@ -145,13 +153,23 @@
 	let seenOverviewRun = '';
 	$: if ($syncJobs.last.overview && $syncJobs.last.overview.id !== seenOverviewRun) {
 		seenOverviewRun = $syncJobs.last.overview.id;
-		if ($syncJobs.last.overview.status === 'done') void loadSnapshot();
+		if ($syncJobs.last.overview.status === 'done') {
+			overviewErr = '';
+			void loadSnapshot();
+		} else if ($syncJobs.last.overview.status !== 'cancelled') {
+			overviewErr = $syncJobs.last.overview.error ?? '';
+		}
 	}
 
 	let seenBriefingRun = '';
 	$: if ($syncJobs.last.briefing && $syncJobs.last.briefing.id !== seenBriefingRun) {
 		seenBriefingRun = $syncJobs.last.briefing.id;
-		if ($syncJobs.last.briefing.status === 'done') void loadBriefing();
+		if ($syncJobs.last.briefing.status === 'done') {
+			briefingErr = '';
+			void loadBriefing();
+		} else if ($syncJobs.last.briefing.status !== 'cancelled') {
+			briefingErr = $syncJobs.last.briefing.error ?? '';
+		}
 	}
 </script>
 
@@ -202,6 +220,9 @@
 					{/if}
 				</div>
 			</div>
+			{#if overviewErr}
+				<p class="text-xs text-red-600 dark:text-red-400 mb-2">{overviewErr}</p>
+			{/if}
 			{#if lines.length}
 				<ul class="space-y-2">
 					{#each lines as line}
@@ -255,6 +276,9 @@
 				</div>
 			</div>
 
+			{#if briefingErr}
+				<p class="text-xs text-red-600 dark:text-red-400 mb-2">{briefingErr}</p>
+			{/if}
 			{#if briefingEmpty}
 				<p class="text-sm text-gray-500">
 					No agenda yet. Click <span class="font-medium">Refresh from XPLAN</span> to read today's tasks and diary.
