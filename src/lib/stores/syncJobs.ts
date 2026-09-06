@@ -189,3 +189,30 @@ export const elapsedLabel = (
 	const secs = Math.max(0, Math.floor((now.getTime() - t) / 1000));
 	return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 };
+
+/**
+ * Start a run for any kind whose last SUCCESS is older than the window.
+ *
+ * This is what "run on a schedule" turned into. What a planner wants is a
+ * briefing that is ready when they open axi, not one compiled at 3am against
+ * an XPLAN session that expired overnight — and this needs no scheduler, so
+ * it cannot double-fire from two beat containers.
+ *
+ * Called once per session from the apps layout. Deliberately quiet: it starts
+ * nothing if a run is already going (a second tab must not queue a second
+ * ~120s agent call), and nothing at all if the job list could not be read,
+ * because a failed poll says nothing about staleness.
+ */
+export const maybeStartStale = async (
+	token: string,
+	kinds: SyncJobKind[] = ['briefing']
+): Promise<void> => {
+	await refreshJobs(token);
+	if (get(syncJobsError)) return;
+	const snap = get(syncJobs);
+	for (const kind of kinds) {
+		if (runningJob(snap, kind)) continue;
+		if (!isStale(snap.lastSuccessAt[kind], BRIEFING_STALE_HOURS)) continue;
+		await startJob(token, kind);
+	}
+};

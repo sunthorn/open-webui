@@ -16,14 +16,18 @@
 	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
 	import SyncJobIndicator from '$lib/components/xplan/SyncJobIndicator.svelte';
 	import { activeClient, clearActiveClient } from '$lib/apps/activeClient';
-	import { startJobPolling, stopJobPolling } from '$lib/stores/syncJobs';
+	import { startJobPolling, stopJobPolling, maybeStartStale } from '$lib/stores/syncJobs';
 
 	// Poll from the LAYOUT, not from the pages. A page that owned the poll
 	// would stop polling the moment you left it — which is the bug this whole
 	// change exists to remove. The poll stops itself when nothing is running,
 	// so an idle apps section costs one request on entry.
+	// Once per visit to the apps section. maybeStartStale polls first, so this
+	// covers the "start polling" job too — a running sync found here is picked
+	// up and shown, whoever started it.
 	onMount(() => {
-		void startJobPolling(localStorage.getItem('token') ?? '');
+		const t = localStorage.getItem('token') ?? '';
+		void maybeStartStale(t).then(() => startJobPolling(t));
 	});
 	onDestroy(stopJobPolling);
 </script>

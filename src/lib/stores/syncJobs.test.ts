@@ -12,6 +12,7 @@ import {
 	runningJob,
 	isStale,
 	elapsedLabel,
+	maybeStartStale,
 	POLL_MS
 } from './syncJobs';
 
@@ -210,5 +211,60 @@ describe('elapsedLabel', () => {
 		// The stamp comes from the server. A browser a few seconds behind must
 		// not render "-3s", which reads as a bug in the sync.
 		expect(elapsedLabel('2026-09-06T12:01:15Z', now)).toBe('0s');
+	});
+});
+
+describe('maybeStartStale', () => {
+	it('starts a briefing that has not succeeded in over 12 hours', async () => {
+		const start = vi.spyOn(api, 'startSyncJob').mockResolvedValue({
+			jobId: 'j1',
+			status: 'queued'
+		});
+		vi.spyOn(api, 'getSyncJobs').mockResolvedValue({
+			...api.EMPTY_SNAPSHOT,
+			lastSuccessAt: { briefing: new Date(Date.now() - 20 * 3600_000).toISOString() }
+		});
+		await maybeStartStale('tok', ['briefing']);
+		expect(start).toHaveBeenCalledWith('tok', 'briefing', {});
+	});
+
+	it('does nothing when the last success is recent', async () => {
+		const start = vi.spyOn(api, 'startSyncJob');
+		vi.spyOn(api, 'getSyncJobs').mockResolvedValue({
+			...api.EMPTY_SNAPSHOT,
+			lastSuccessAt: { briefing: new Date(Date.now() - 3600_000).toISOString() }
+		});
+		await maybeStartStale('tok', ['briefing']);
+		expect(start).not.toHaveBeenCalled();
+	});
+
+	it('does not start a second run when one is already going', async () => {
+		// Opening a second tab must not queue a second ~120s agent call.
+		const start = vi.spyOn(api, 'startSyncJob');
+		vi.spyOn(api, 'getSyncJobs').mockResolvedValue({
+			...api.EMPTY_SNAPSHOT,
+			running: [job({ kind: 'briefing' })],
+			lastSuccessAt: {}
+		});
+		await maybeStartStale('tok', ['briefing']);
+		expect(start).not.toHaveBeenCalled();
+	});
+
+	it('starts one when nothing has ever succeeded', async () => {
+		const start = vi
+			.spyOn(api, 'startSyncJob')
+			.mockResolvedValue({ jobId: 'j1', status: 'queued' });
+		vi.spyOn(api, 'getSyncJobs').mockResolvedValue(api.EMPTY_SNAPSHOT);
+		await maybeStartStale('tok', ['briefing']);
+		expect(start).toHaveBeenCalled();
+	});
+
+	it('starts nothing when the job list cannot be read', async () => {
+		// A failed poll says nothing about staleness. Guessing "stale" here
+		// spends tokens every time the gateway hiccups.
+		const start = vi.spyOn(api, 'startSyncJob');
+		vi.spyOn(api, 'getSyncJobs').mockRejectedValue(new Error('gateway down'));
+		await maybeStartStale('tok', ['briefing']);
+		expect(start).not.toHaveBeenCalled();
 	});
 });
