@@ -11,6 +11,7 @@ import {
 	stopJob,
 	runningJob,
 	isStale,
+	elapsedLabel,
 	POLL_MS
 } from './syncJobs';
 
@@ -174,5 +175,40 @@ describe('stopJob', () => {
 		await stopJob('tok', 'j1');
 		expect(cancel).toHaveBeenCalledWith('tok', 'j1');
 		expect(poll).toHaveBeenCalled();
+	});
+});
+
+describe('elapsedLabel', () => {
+	const now = new Date('2026-09-06T12:01:12Z');
+
+	it('reads as m s past the first minute', () => {
+		expect(elapsedLabel('2026-09-06T12:00:00Z', now)).toBe('1m 12s');
+	});
+
+	it('reads as seconds only under a minute', () => {
+		expect(elapsedLabel('2026-09-06T12:00:50Z', now)).toBe('22s');
+	});
+
+	it('says "queued" when nothing has started it yet', () => {
+		// A queued job has no startedAt. "0s" would claim it is running.
+		expect(elapsedLabel(null, now)).toBe('queued');
+	});
+
+	it('says the worker may be down once a job has waited five minutes', () => {
+		// Design §8. Otherwise a stopped worker is an infinite spinner with
+		// nothing on screen naming the actual problem.
+		expect(elapsedLabel(null, now, '2026-09-06T11:50:00Z')).toBe(
+			'queued — the worker may be down'
+		);
+	});
+
+	it('does not accuse the worker while the wait is still normal', () => {
+		expect(elapsedLabel(null, now, '2026-09-06T12:01:00Z')).toBe('queued');
+	});
+
+	it('never shows a negative age when the clocks disagree', () => {
+		// The stamp comes from the server. A browser a few seconds behind must
+		// not render "-3s", which reads as a bug in the sync.
+		expect(elapsedLabel('2026-09-06T12:01:15Z', now)).toBe('0s');
 	});
 });

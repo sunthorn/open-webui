@@ -11,10 +11,21 @@
 	// Gone with it: the localStorage.sidebar borrow-and-restore, which existed
 	// only to undo the collapse, and AppsRail, which the axi rail replaces.
 	import { goto } from '$app/navigation';
+	import { onMount, onDestroy } from 'svelte';
 	import { showSidebar } from '$lib/stores';
 	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
+	import SyncJobIndicator from '$lib/components/xplan/SyncJobIndicator.svelte';
 	import { activeClient, clearActiveClient } from '$lib/apps/activeClient';
+	import { startJobPolling, stopJobPolling } from '$lib/stores/syncJobs';
 
+	// Poll from the LAYOUT, not from the pages. A page that owned the poll
+	// would stop polling the moment you left it — which is the bug this whole
+	// change exists to remove. The poll stops itself when nothing is running,
+	// so an idle apps section costs one request on entry.
+	onMount(() => {
+		void startJobPolling(localStorage.getItem('token') ?? '');
+	});
+	onDestroy(stopJobPolling);
 </script>
 
 <!-- The same width rule every other axi page uses, so the rail and the panel
@@ -45,11 +56,13 @@
 			     nothing under it lining up. Every /apps page now uses this same
 			     width -- data-entry was the last 4xl holdout. -->
 			<div class="w-full max-w-3xl mx-auto px-8 flex items-center justify-between gap-3">
-				<!-- Left edge: XPLAN connection + agent access. It's the precondition
-				     for everything else, so it reads first and links to the page
-				     that fixes whatever it is reporting. -->
-				<div class="shrink-0">
-					<XplanStatusPill inline />
+				<!-- Left edge: XPLAN connection + access, then whatever is running.
+				     Both are "state of the link", and both belong on every page. -->
+				<div class="flex items-center gap-3 min-w-0">
+					<div class="shrink-0">
+						<XplanStatusPill inline />
+					</div>
+					<SyncJobIndicator />
 				</div>
 
 				<!-- Right edge: what you're working on, with the actions on it. -->

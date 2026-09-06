@@ -14,6 +14,7 @@ import {
 	getSyncJobs,
 	startSyncJob,
 	EMPTY_SNAPSHOT,
+	WORKER_SILENT_MS,
 	type JobsSnapshot,
 	type SyncJob,
 	type SyncJobKind
@@ -157,4 +158,34 @@ export const stopJob = async (token: string, jobId: string): Promise<void> => {
 		syncJobsError.set(message(e));
 	}
 	await refreshJobs(token);
+};
+
+/**
+ * How long this run has been going, for the top-bar indicator.
+ *
+ * A queued job has no `startedAt` and must say so — "0s" would claim it is
+ * running when no worker has picked it up. Once it has been queued for five
+ * minutes, say why nothing is happening: a stopped worker is otherwise an
+ * infinite spinner with nothing on screen naming the actual problem.
+ *
+ * Clamped at zero because the stamp is the server's, and a browser a few
+ * seconds behind would otherwise render "-3s" — which reads as a bug in the
+ * sync rather than in the clocks.
+ */
+export const elapsedLabel = (
+	startedAt: string | null,
+	now: Date = new Date(),
+	createdAt: string | null = null
+): string => {
+	if (!startedAt) {
+		const asked = createdAt ? new Date(createdAt).getTime() : NaN;
+		if (!Number.isNaN(asked) && now.getTime() - asked > WORKER_SILENT_MS) {
+			return 'queued — the worker may be down';
+		}
+		return 'queued';
+	}
+	const t = new Date(startedAt).getTime();
+	if (Number.isNaN(t)) return 'queued';
+	const secs = Math.max(0, Math.floor((now.getTime() - t) / 1000));
+	return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 };
