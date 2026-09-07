@@ -35,6 +35,10 @@ describe('buildPrompt', () => {
 		expect(prompt).toContain('browser_console'); // fragile JS reads + a write risk — forbidden
 		expect(prompt).toContain('execute_code');
 		expect(prompt).toContain('browser_cdp');
+		// The model sometimes reaches for a screenshot to double-check a text
+		// read; hermes' current Gemini endpoint rejects image content in tool
+		// results outright, which turned a real briefing into a hard failure.
+		expect(prompt).toContain('browser_vision');
 		expect(prompt).toContain('Do not loop');
 	});
 	it('steers reads to browser_snapshot, not JavaScript', () => {

@@ -44,9 +44,10 @@ export const buildPrompt = (op: XplanOperation, params: Params = {}): string => 
 		'',
 		'Read the page using browser_snapshot (a structured read of the page content). Do NOT write or run JavaScript to read the page.',
 		'If you are not logged in, output exactly: NOT_LOGGED_IN',
-		`Do NOT use browser_console, execute_code, or browser_cdp. ${
-			op.paging ? 'Do not loop beyond the paging described above.' : 'Do not loop.'
-		}`
+		`Do NOT use browser_console, execute_code, browser_cdp, or browser_vision. A text ` +
+			`snapshot of the page is enough; you do not need to see it. ${
+				op.paging ? 'Do not loop beyond the paging described above.' : 'Do not loop.'
+			}`
 	];
 	return lines.join('\n');
 };
