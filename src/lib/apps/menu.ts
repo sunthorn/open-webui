@@ -114,9 +114,9 @@ export const APPS: AppDef[] = [
 			{
 				kind: 'link',
 				id: 'xplan-clients',
-				// "Client", not "Clients": finny's Documents panel has its own
-				// Clients row, and the two are different things. This one is the
-				// XPLAN-side client list the planner syncs from.
+				// Documents has its own "Client" row too — same label, different
+				// app menu, so the two are never on screen together. This one is
+				// the XPLAN-side client list the planner syncs from.
 				label: 'Client',
 				href: '/apps/clients',
 				icon: ICON.users
@@ -242,8 +242,13 @@ export const APPS: AppDef[] = [
 			{
 				kind: 'link',
 				id: 'finny-clients',
-				label: 'Clients',
-				href: '/x/finny/clients',
+				// Singular, and an axi route rather than finny's list: Documents
+				// opens on whoever the planner is working on. /x/finny/client
+				// resolves that, or explains why it can't. finny's own /clients
+				// list is still mounted — it is the only way to create a client
+				// or run a CSV import — it just isn't the way in any more.
+				label: 'Client',
+				href: '/x/finny/client',
 				icon: ICON.users
 			},
 			{
