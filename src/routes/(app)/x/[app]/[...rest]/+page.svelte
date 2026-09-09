@@ -21,7 +21,6 @@
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import { APPS } from '$lib/apps/menu';
-	import { showSidebar } from '$lib/stores';
 
 	let frame: HTMLIFrameElement;
 	let loading = true;
@@ -66,16 +65,7 @@
 	<title>{APPS.find((a) => a.id === appId)?.label ?? 'axi'}</title>
 </svelte:head>
 
-<!--
-	Same width rule every other axi page uses. Without it the frame spans the
-	full viewport and runs UNDER the sidebar, which is translucent — so the
-	app's own list showed through axi's menu as a ghost.
--->
-<div
-	class="relative flex flex-col w-full h-screen max-h-[100dvh] transition-width duration-200 ease-in-out {$showSidebar
-		? 'md:max-w-[calc(100%-var(--sidebar-width))]'
-		: ''} max-w-full bg-white dark:bg-gray-900"
->
+<div class="relative w-full h-full">
 	{#if !known}
 		<div class="w-full h-full flex items-center justify-center text-sm text-gray-500">
 			Unknown app: {appId}
