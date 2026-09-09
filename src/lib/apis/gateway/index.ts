@@ -365,10 +365,25 @@ export const setXplanAccess = async (token: string, level: XplanAccessLevel): Pr
 
 export type XplanSectionStatus = 'ok' | 'empty' | 'changed' | 'error';
 
+/**
+ * XPLAN's Entity Status. The synced book is NOT all active clients — it also
+ * holds archived, prospect, deceased and group-plan records — so anything that
+ * shows a name has to show this too. `null` means the row was swept before the
+ * column existed; it does not mean 'client'.
+ */
+export type XplanEntityStatus =
+	| 'client'
+	| 'archived'
+	| 'prospect'
+	| 'deceased'
+	| 'group_plan_member'
+	| 'unknown';
+
 export interface XplanClientRecord {
 	xplanClientId: string;
 	xplanHouseholdId: string | null;
 	name: string;
+	entityStatus: XplanEntityStatus | null;
 	syncedAt: string;
 	deepSyncedAt: string | null;
 }

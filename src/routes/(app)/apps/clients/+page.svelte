@@ -6,7 +6,12 @@
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { GatewayError, getBriefing, listAllClients } from '$lib/apis/gateway';
+	import {
+		GatewayError,
+		getBriefing,
+		listAllClients,
+		type XplanEntityStatus
+	} from '$lib/apis/gateway';
 	import {
 		activeClient,
 		clearRecentClients,
@@ -28,7 +33,10 @@
 	let attentionUnresolved = '';
 
 	// The synced XPLAN client book (local copy).
-	let book: XplanClient[] = [];
+	// XplanClient is the agent-search shape ({name, id}); the synced book also
+	// carries an entity status, which must be shown — most of the book is not
+	// active clients.
+	let book: (XplanClient & { status: XplanEntityStatus | null })[] = [];
 	let syncErr = '';
 
 	const token = () => localStorage.getItem('token') ?? '';
@@ -113,7 +121,11 @@
 			// the shrink guard below comparing a full sweep against a fraction
 			// of the stored book, which made it stop guarding anything.
 			const res = await listAllClients(token());
-			book = res.clients.map((c) => ({ id: c.xplanClientId, name: c.name }));
+			book = res.clients.map((c) => ({
+				id: c.xplanClientId,
+				name: c.name,
+				status: c.entityStatus ?? null
+			}));
 		} catch (e) {
 			// GET /gw/clients answers 403 (access tier is Lock), 409 (book never
 			// synced) or 502 (contact-layer's _raise_if_store_unavailable — the
@@ -201,6 +213,28 @@
 	};
 
 	$: q = query.trim().toLowerCase();
+	// Deceased and archived read as warnings, not neutral metadata: acting on a
+	// deceased client is the mistake this badge exists to prevent. An ordinary
+	// client gets no badge — 759 of them, and a label on every row is noise that
+	// makes the exceptions harder to spot, not easier.
+	const statusBadge = (s: XplanEntityStatus | null) => {
+		switch (s) {
+			case 'deceased':
+				return { label: 'Deceased', class: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' };
+			case 'archived':
+				return { label: 'Archived', class: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' };
+			case 'prospect':
+				return { label: 'Prospect', class: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' };
+			case 'group_plan_member':
+				return { label: 'Group plan', class: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' };
+			case 'unknown':
+				return { label: 'Unknown', class: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500' };
+			default:
+				// 'client', and null for rows synced before the status existed.
+				return null;
+		}
+	};
+
 	// Show the synced book: when searching, show ALL matches; when browsing, show
 	// a growing window (browseLimit) with a "Show more" control so the planner can
 	// page through the whole book instead of being capped at 50.
@@ -372,6 +406,11 @@
 					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
 						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">{c.name.slice(0, 1).toUpperCase()}</span>
 						<span class="flex-1 min-w-0 truncate">{c.name}</span>
+						{#if statusBadge(c.status)}
+							<span class="text-[10px] px-1.5 py-0.5 rounded-full shrink-0 {statusBadge(c.status)?.class}">
+								{statusBadge(c.status)?.label}
+							</span>
+						{/if}
 						{#if c.id}<span class="text-[10px] text-gray-400 tabular-nums">id {c.id}</span>{/if}
 					</button>
 				{/each}
