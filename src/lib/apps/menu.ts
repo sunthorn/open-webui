@@ -114,10 +114,10 @@ export const APPS: AppDef[] = [
 			{
 				kind: 'link',
 				id: 'xplan-clients',
-				// "Clients-Sync", not "Clients": finny's Documents panel has its own
+				// "Client", not "Clients": finny's Documents panel has its own
 				// Clients row, and the two are different things. This one is the
 				// XPLAN-side client list the planner syncs from.
-				label: 'Clients-Sync',
+				label: 'Client',
 				href: '/apps/clients',
 				icon: ICON.users
 			},
