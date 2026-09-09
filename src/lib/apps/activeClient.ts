@@ -1,7 +1,7 @@
 // The "active client" — who the planner is currently working on. Persisted to
 // the browser so it survives navigation between apps and reloads, until the
 // planner picks a different client on the Clients hub.
-import { writable } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 
 export interface ActiveClient {
@@ -26,6 +26,19 @@ const readJSON = <T>(key: string, fallback: T): T => {
 
 export const activeClient = writable<ActiveClient | null>(readJSON(ACTIVE_KEY, null));
 export const recentClients = writable<ActiveClient[]>(readJSON(RECENT_KEY, []));
+
+/**
+ * The active client's XPLAN id, or null when there is nothing another app's
+ * foreign key can reference.
+ *
+ * A `mode: 'new'` lead carries a LOCAL id (`new:<name>`) minted by the Clients
+ * page, not an XPLAN id. Handing that to finny or salem would write a dangling
+ * reference into the identity contract, so every consumer reads this store
+ * rather than `activeClient.id` directly.
+ */
+export const linkableClientId = derived(activeClient, ($c) =>
+	$c && $c.mode === 'existing' && $c.id.trim() ? $c.id : null
+);
 
 if (browser) {
 	activeClient.subscribe((v) => {
