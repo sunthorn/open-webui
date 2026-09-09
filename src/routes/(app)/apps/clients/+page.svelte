@@ -21,6 +21,11 @@
 	let query = '';
 	let attention: string[] = [];
 	let leads: Lead[] = [];
+	// Set when a "Needs attention" name can't be matched to an id in the
+	// synced book (see pickFromAttention below) — never left silently unset,
+	// because pickExisting() with a blank id would otherwise render exactly
+	// like a real selection.
+	let attentionUnresolved = '';
 
 	// The synced XPLAN client book (local copy).
 	let book: XplanClient[] = [];
@@ -151,6 +156,30 @@
 	const pickExisting = (name: string, id = '') => {
 		setActiveClient({ id: id || '', name, mode: 'existing', since: nowIso() });
 		goto('/apps/clients/detail');
+	};
+
+	/**
+	 * "Needs attention" names come from the briefing, which carries a name but
+	 * no id (see onMount above). Resolving against the already-loaded `book`
+	 * gives the honest id for the SAME id space `pickExisting` promises —
+	 * both are the synced XPLAN book, so a match here is exactly the client
+	 * the row is naming, not a lookalike.
+	 *
+	 * Finding 3: calling pickExisting(name) with no id used to set an
+	 * `existing` client with id: '' — indistinguishable in the bar from a
+	 * real selection, while every consumer of linkableClientId silently saw
+	 * null. When there is no match (book not yet synced, or the briefing
+	 * named someone the book sweep hasn't seen), do NOT set the active
+	 * client at all — surface it instead, so the state stays honest.
+	 */
+	const pickFromAttention = (name: string) => {
+		attentionUnresolved = '';
+		const match = book.find((c) => c.name === name);
+		if (match) {
+			pickExisting(match.name, match.id);
+			return;
+		}
+		attentionUnresolved = name;
 	};
 
 	const createNew = async () => {
@@ -295,9 +324,15 @@
 	{#if attentionFiltered.length}
 		<section class="mb-6">
 			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Needs attention · from today’s briefing</h2>
+			{#if attentionUnresolved}
+				<p class="text-xs text-red-600 dark:text-red-400 mb-2">
+					Couldn’t match “{attentionUnresolved}” to a client in the synced book — sync the client
+					book, or search for them by name above.
+				</p>
+			{/if}
 			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
 				{#each attentionFiltered as name}
-					<button on:click={() => pickExisting(name)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
+					<button on:click={() => pickFromAttention(name)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
 						<span class="size-1.5 rounded-full bg-red-500 shrink-0"></span>
 						<span class="flex-1 min-w-0 truncate">{name}</span>
 					</button>

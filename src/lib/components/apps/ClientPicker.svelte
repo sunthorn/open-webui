@@ -12,13 +12,15 @@
 	 *
 	 * Search here MUST hit the synced book (`listClients`), not
 	 * GET /gw/clients/search-live: search_live() (contact-layer/app/
-	 * factfind.py) returns the INDIVIDUAL entity id, but the book — what
-	 * the Clients page selects with, what finny's directory and salem's
-	 * xplan_client_id join on — keys by the HOUSEHOLD id. Picking the same
-	 * person from here and from the Clients page must yield the same id;
-	 * search-live would silently split a couple into two different active-
-	 * client ids depending on which control was used. listClients is also
-	 * available above the `lock` access tier, where search-live 403s.
+	 * factfind.py) reads its id from /resourceful/entity, an id space that
+	 * has never been shown to equal the book sweep's checkbox value — the
+	 * one that (contact-layer/app/cdp.py:164-170) is the true individual id,
+	 * while the row's data-entity-id is the HOUSEHOLD id and drops one
+	 * partner from every couple if used instead (data-layer/app/models.py:
+	 * 74-76). listClients returns exactly the id the Clients page selects
+	 * with, so both controls agree by construction; search-live's id has no
+	 * such guarantee and picking the same person from here and from the
+	 * Clients page could silently yield two different active-client ids.
 	 */
 	import { createEventDispatcher, onMount, onDestroy } from 'svelte';
 	import { recentClients, setActiveClient } from '$lib/apps/activeClient';

@@ -35,3 +35,28 @@ export const finnyClientTarget = (
  */
 export const withClient = (href: string, clientId: string | null): string =>
 	clientId ? `${href}${href.includes('?') ? '&' : '?'}client=${encodeURIComponent(clientId)}` : href;
+
+/**
+ * Where to send the browser when the active client changes WHILE the planner
+ * is already sitting on a framed route.
+ *
+ * The picker (and the ✕ clear) used to only update the store — the iframe's
+ * `src` is derived once, from the URL, when the frame first mounts, so
+ * nothing re-read the store after that and the frame kept showing whoever
+ * was active when it loaded. This is the piece that turns "the store
+ * changed" into "the URL — and therefore the frame — changes too".
+ *
+ * Returns `null` when `pathname` is not a framed client route at all, so the
+ * caller knows not to navigate.
+ */
+export const rescopeUrl = (pathname: string, clientId: string | null): string | null => {
+	if (pathname === '/x/salem' || pathname.startsWith('/x/salem/')) {
+		return withClient(pathname, clientId);
+	}
+	if (pathname.startsWith('/x/finny/clients/')) {
+		if (!clientId) return '/x/finny/client';
+		const target = finnyClientTarget(clientId, null);
+		return target.kind === 'ready' ? target.href : null;
+	}
+	return null;
+};

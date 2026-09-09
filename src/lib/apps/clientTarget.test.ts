@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { finnyClientTarget, withClient } from './clientTarget';
+import { finnyClientTarget, withClient, rescopeUrl } from './clientTarget';
 
 describe('finnyClientTarget', () => {
 	it('routes to the client profile when there is an XPLAN id', () => {
@@ -50,5 +50,35 @@ describe('withClient', () => {
 
 	it('leaves the path alone when there is no linkable client', () => {
 		expect(withClient('/x/salem/meetings', null)).toBe('/x/salem/meetings');
+	});
+});
+
+describe('rescopeUrl', () => {
+	it('re-attaches the new client to a salem page as a query param', () => {
+		expect(rescopeUrl('/x/salem/meetings', '899317')).toBe('/x/salem/meetings?client=899317');
+	});
+
+	it('re-attaches the new client to a nested salem page', () => {
+		expect(rescopeUrl('/x/salem/notes/123', '899317')).toBe('/x/salem/notes/123?client=899317');
+	});
+
+	it('drops the query param from a salem page when the client is cleared', () => {
+		expect(rescopeUrl('/x/salem/meetings', null)).toBe('/x/salem/meetings');
+	});
+
+	it('re-points a finny client page at the new client', () => {
+		expect(rescopeUrl('/x/finny/clients/A', 'B')).toBe('/x/finny/clients/B');
+	});
+
+	it('sends a finny client page back to the gate route when the client is cleared', () => {
+		expect(rescopeUrl('/x/finny/clients/A', null)).toBe('/x/finny/client');
+	});
+
+	it('returns null for a route that is not framed', () => {
+		expect(rescopeUrl('/apps/clients', '899317')).toBeNull();
+	});
+
+	it('returns null for the finny gate route itself', () => {
+		expect(rescopeUrl('/x/finny/client', '899317')).toBeNull();
 	});
 });

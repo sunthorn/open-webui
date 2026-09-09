@@ -8,10 +8,13 @@
 	 * layouts — /apps and /x — and in /x it sits in the PARENT, above the
 	 * iframe. The framed apps never see it and stay unaware they are scoped.
 	 */
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
 	import SyncJobIndicator from '$lib/components/xplan/SyncJobIndicator.svelte';
 	import ClientPicker from './ClientPicker.svelte';
-	import { activeClient, clearActiveClient } from '$lib/apps/activeClient';
+	import { activeClient, clearActiveClient, linkableClientId } from '$lib/apps/activeClient';
+	import { rescopeUrl } from '$lib/apps/clientTarget';
 
 	/**
 	 * Sync-job state belongs to xPlan's own data sync. Opening Documents should
@@ -21,6 +24,27 @@
 	export let showSyncJobs = false;
 
 	let picking = false;
+
+	/**
+	 * Point the current route at whoever is active now.
+	 *
+	 * This lives here, not in ClientPicker, so that clearing the client with
+	 * the ✕ button gets the exact same treatment as switching with the
+	 * picker — both end by calling this. `setActiveClient`/`clearActiveClient`
+	 * always run first, so `$linkableClientId` below is already the NEW
+	 * value (Svelte's store subscriptions update synchronously) by the time
+	 * this reads it.
+	 *
+	 * A no-op when the computed target is already where we are — picking the
+	 * client that's already active, or closing the picker without choosing
+	 * anything, must not remount the iframe.
+	 */
+	const rescope = () => {
+		const target = rescopeUrl($page.url.pathname, $linkableClientId);
+		if (!target) return;
+		const current = $page.url.pathname + $page.url.search;
+		if (target !== current) goto(target);
+	};
 </script>
 
 <!-- "Working on" context bar — the active client follows the planner across
@@ -86,7 +110,10 @@
 						Change
 					</button>
 					<button
-						on:click={clearActiveClient}
+						on:click={() => {
+							clearActiveClient();
+							rescope();
+						}}
 						aria-label="Clear active client"
 						class="text-gray-400 hover:text-red-500 size-6 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 					>
@@ -103,7 +130,12 @@
 				</button>
 			{/if}
 			{#if picking}
-				<ClientPicker on:close={() => (picking = false)} />
+				<ClientPicker
+					on:close={() => {
+						picking = false;
+						rescope();
+					}}
+				/>
 			{/if}
 		</div>
 	</div>

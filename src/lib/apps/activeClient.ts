@@ -37,7 +37,7 @@ export const recentClients = writable<ActiveClient[]>(readJSON(RECENT_KEY, []));
  * rather than `activeClient.id` directly.
  */
 export const linkableClientId = derived(activeClient, ($c) =>
-	$c && $c.mode === 'existing' && $c.id.trim() ? $c.id : null
+	$c && $c.mode === 'existing' && $c.id.trim() ? $c.id.trim() : null
 );
 
 if (browser) {

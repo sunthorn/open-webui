@@ -36,4 +36,9 @@ describe('linkableClientId', () => {
 		activeClient.set(client({ id: '   ' }));
 		expect(get(linkableClientId)).toBe(null);
 	});
+
+	it('is trimmed when the id has surrounding whitespace', () => {
+		activeClient.set(client({ id: ' 899317 ' }));
+		expect(get(linkableClientId)).toBe('899317');
+	});
 });
