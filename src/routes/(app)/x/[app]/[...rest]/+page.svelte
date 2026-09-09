@@ -30,8 +30,20 @@
 	$: rest = $page.params.rest ?? '';
 	$: known = APPS.some((a) => a.id === appId);
 
-	/** /x/salem/meetings -> /salem/meetings?embed=1 */
-	$: src = known ? `/${appId}/${rest}${rest.includes('?') ? '&' : '?'}embed=1` : '';
+	/**
+	 * The active client, when the Sidebar put one on this axi URL.
+	 *
+	 * `$page.params.rest` is path only -- SvelteKit never folds the query
+	 * string into a rest param -- so it has to be read and re-attached here
+	 * by hand, or salem's iframe never sees it at all.
+	 */
+	$: clientId = $page.url.searchParams.get('client');
+
+	/** /x/salem/meetings -> /salem/meetings?embed=1
+	 *  /x/salem/meetings?client=899317 -> /salem/meetings?embed=1&client=899317 */
+	$: src = known
+		? `/${appId}/${rest}${rest.includes('?') ? '&' : '?'}embed=1${clientId ? `&client=${encodeURIComponent(clientId)}` : ''}`
+		: '';
 
 	/**
 	 * Keep axi's address bar in step with the frame.

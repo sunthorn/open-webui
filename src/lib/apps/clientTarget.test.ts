@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { finnyClientTarget } from './clientTarget';
+import { finnyClientTarget, withClient } from './clientTarget';
 
 describe('finnyClientTarget', () => {
 	it('routes to the client profile when there is an XPLAN id', () => {
@@ -34,5 +34,21 @@ describe('finnyClientTarget', () => {
 			kind: 'ready',
 			href: '/x/finny/clients/899317'
 		});
+	});
+});
+
+describe('withClient', () => {
+	it('appends the client to a plain path', () => {
+		expect(withClient('/x/salem/meetings', '899317')).toBe('/x/salem/meetings?client=899317');
+	});
+
+	it('appends with & when the path already has a query', () => {
+		expect(withClient('/x/salem/notes?folder=1', '899317')).toBe(
+			'/x/salem/notes?folder=1&client=899317'
+		);
+	});
+
+	it('leaves the path alone when there is no linkable client', () => {
+		expect(withClient('/x/salem/meetings', null)).toBe('/x/salem/meetings');
 	});
 });

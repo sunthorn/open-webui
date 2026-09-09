@@ -21,6 +21,8 @@
 	import { appById, type MenuRow } from '$lib/apps/menu';
 	import { activeApp, optionsOpen, showSidebar, mobile } from '$lib/stores';
 	import { ICON } from '$lib/apps/menu';
+	import { withClient } from '$lib/apps/clientTarget';
+	import { linkableClientId } from '$lib/apps/activeClient';
 
 	$: app = appById($activeApp);
 	$: rows = (app?.root ?? []) as MenuRow[];
@@ -28,6 +30,16 @@
 
 	const isActive = (href: string) =>
 		href && ($page.url.pathname === href || $page.url.pathname.startsWith(href + '/'));
+
+	/**
+	 * salem's rows carry the active axi client on the URL -- it is the only
+	 * federated app that reads one (see clientTarget.ts). finny scopes by path
+	 * instead, and axi's own rows have no XPLAN client to carry, so both are
+	 * left untouched here. Matched by app id rather than by row, since that is
+	 * the only place "which app owns this row" is known at render time.
+	 */
+	$: scopedHref = (href: string) =>
+		app?.id === 'salem' ? withClient(href, $linkableClientId) : href;
 
 	/** The Options row is "current" while you are on any page it reveals. */
 	$: optionsHasActive = !!app?.options?.some(
@@ -52,7 +64,7 @@
 			return; // let the anchor do it
 		}
 		e.preventDefault();
-		goto(row.href);
+		goto(scopedHref(row.href));
 		if ($mobile) showSidebar.set(false);
 	};
 </script>
@@ -136,7 +148,7 @@
 									</div>
 								{:else}
 									<a
-										href={sub.href || '#'}
+										href={sub.href ? scopedHref(sub.href) : '#'}
 										draggable="false"
 										aria-label={sub.label}
 										aria-current={isActive(sub.href) ? 'page' : undefined}
@@ -165,7 +177,7 @@
 					{/if}
 				{:else}
 					<a
-						href={row.href || '#'}
+						href={row.href ? scopedHref(row.href) : '#'}
 						draggable="false"
 						aria-label={row.label}
 						aria-current={isActive(row.href) ? 'page' : undefined}

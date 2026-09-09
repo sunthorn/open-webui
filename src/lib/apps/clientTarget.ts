@@ -28,3 +28,10 @@ export const finnyClientTarget = (
 	if (leadName) return { kind: 'lead', name: leadName };
 	return { kind: 'none' };
 };
+
+/**
+ * salem scopes by query parameter rather than by path: a meeting is not "at"
+ * a client the way a finny profile is, it is merely recorded for one.
+ */
+export const withClient = (href: string, clientId: string | null): string =>
+	clientId ? `${href}${href.includes('?') ? '&' : '?'}client=${encodeURIComponent(clientId)}` : href;
