@@ -10,7 +10,8 @@
 		GatewayError,
 		getBriefing,
 		listAllClients,
-		type XplanEntityStatus
+		type XplanEntityStatus,
+		type XplanEntityType
 	} from '$lib/apis/gateway';
 	import {
 		activeClient,
@@ -36,7 +37,10 @@
 	// XplanClient is the agent-search shape ({name, id}); the synced book also
 	// carries an entity status, which must be shown — most of the book is not
 	// active clients.
-	let book: (XplanClient & { status: XplanEntityStatus | null })[] = [];
+	let book: (XplanClient & {
+		status: XplanEntityStatus | null;
+		type: XplanEntityType | null;
+	})[] = [];
 	let syncErr = '';
 
 	const token = () => localStorage.getItem('token') ?? '';
@@ -124,7 +128,8 @@
 			book = res.clients.map((c) => ({
 				id: c.xplanClientId,
 				name: c.name,
-				status: c.entityStatus ?? null
+				status: c.entityStatus ?? null,
+				type: c.entityType ?? null
 			}));
 		} catch (e) {
 			// GET /gw/clients answers 403 (access tier is Lock), 409 (book never
@@ -213,26 +218,126 @@
 	};
 
 	$: q = query.trim().toLowerCase();
+	// A row with no status is bucketed as 'unknown' rather than assumed to be a
+	// client — the whole point of the label is that an unqualified row must not
+	// read as an active client.
+	const statusKey = (s: XplanEntityStatus | null): string => s ?? 'unknown';
+
+	const STATUS_LABEL: Record<string, string> = {
+		client: 'Clients',
+		prospect: 'Prospect',
+		group_plan_member: 'Group plan',
+		archived: 'Archived',
+		deceased: 'Deceased',
+		unknown: 'Unknown'
+	};
+	// Filter order, worst-news last. Only statuses the book actually contains
+	// are offered, so a firm with no deceased records never sees a dead tickbox.
+	const STATUS_ORDER = ['client', 'prospect', 'group_plan_member', 'archived', 'deceased', 'unknown'];
+
 	// Deceased and archived read as warnings, not neutral metadata: acting on a
 	// deceased client is the mistake this badge exists to prevent. An ordinary
 	// client gets no badge — 759 of them, and a label on every row is noise that
 	// makes the exceptions harder to spot, not easier.
+	const STATUS_CLASS: Record<string, string> = {
+		deceased: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+		archived: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+		prospect: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+		group_plan_member: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
+		unknown: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500'
+	};
 	const statusBadge = (s: XplanEntityStatus | null) => {
-		switch (s) {
-			case 'deceased':
-				return { label: 'Deceased', class: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' };
-			case 'archived':
-				return { label: 'Archived', class: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' };
-			case 'prospect':
-				return { label: 'Prospect', class: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' };
-			case 'group_plan_member':
-				return { label: 'Group plan', class: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' };
-			case 'unknown':
-				return { label: 'Unknown', class: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-500' };
-			default:
-				// 'client', and null for rows synced before the status existed.
-				return null;
+		// 'client', and null for rows synced before the status existed.
+		const k = s ?? '';
+		return STATUS_CLASS[k] ? { label: STATUS_LABEL[k], class: STATUS_CLASS[k] } : null;
+	};
+
+	const TYPE_LABEL: Record<string, string> = {
+		individual: 'Individual',
+		company: 'Company',
+		trust: 'Trust',
+		superfund: 'Superfund',
+		partnership: 'Partnership',
+		unknown: 'Unknown'
+	};
+	const TYPE_ORDER = ['individual', 'company', 'trust', 'superfund', 'partnership', 'unknown'];
+
+	// Both filters track what is EXCLUDED, so the default (empty) shows
+	// everything and a value we have never seen appears rather than being
+	// silently filtered out.
+	let hiddenStatuses = new Set<string>();
+	let hiddenTypes = new Set<string>();
+	let openFilter: 'status' | 'type' | null = null;
+	let filtersRoot: HTMLElement;
+
+	// `rows` is a parameter, not a closure over `book`, and both call sites pass
+	// `book` explicitly. That is load-bearing: Svelte derives a reactive
+	// statement's dependencies from the identifiers IN the statement, so a
+	// helper that reads `book` from its own scope leaves `book` untracked —
+	// these counts were computed once against an empty book and never again,
+	// which left every filter with zero options and no dropdown to open.
+	const countBy = (rows: typeof book, get: (c: (typeof book)[number]) => string) =>
+		rows.reduce<Record<string, number>>((acc, c) => {
+			const k = get(c);
+			acc[k] = (acc[k] ?? 0) + 1;
+			return acc;
+		}, {});
+
+	$: statusCounts = countBy(book, (c) => statusKey(c.status));
+	$: typeCounts = countBy(book, (c) => c.type ?? 'unknown');
+	// Every value XPLAN offers stays listed even at zero, greyed out rather than
+	// dropped: "Deceased 0" is an answer, and a control whose options appear and
+	// disappear with the data makes the reader wonder what else is missing.
+	// `unknown` is the exception — it is our fallback, not an XPLAN choice, so it
+	// only appears once something has actually landed in it.
+	$: statusOptions = STATUS_ORDER.filter((s) => s !== 'unknown' || statusCounts[s]);
+	$: typeOptions = TYPE_ORDER.filter((t) => t !== 'unknown' || typeCounts[t]);
+
+	$: filterMenus = [
+		{
+			key: 'status' as const,
+			label: 'Status',
+			options: statusOptions,
+			hidden: hiddenStatuses,
+			counts: statusCounts,
+			labels: STATUS_LABEL
+		},
+		{
+			key: 'type' as const,
+			label: 'Type',
+			options: typeOptions,
+			hidden: hiddenTypes,
+			counts: typeCounts,
+			labels: TYPE_LABEL
 		}
+	];
+
+	// What the button face says. "All" / "Clients" / "2 of 3" reads as a control
+	// with a current value; a bare "Status ▾" reads as a heading.
+	const summarise = (
+		options: string[],
+		hidden: Set<string>,
+		counts: Record<string, number>,
+		labels: Record<string, string>
+	) => {
+		// An empty bucket is neither shown nor hidden — it has nothing to show.
+		const available = options.filter((o) => counts[o]);
+		const shown = available.filter((o) => !hidden.has(o));
+		if (!available.length) return '—';
+		if (shown.length === available.length) return 'All';
+		if (!shown.length) return 'None';
+		if (shown.length === 1) return labels[shown[0]];
+		return `${shown.length} of ${available.length}`;
+	};
+
+	const toggle = (set: Set<string>, k: string) => {
+		// Reassign, not mutate: Svelte does not track Set mutation.
+		const next = new Set(set);
+		next.has(k) ? next.delete(k) : next.add(k);
+		// The browse window is a count, not a cursor — leaving it where it was
+		// after the list underneath changed size shows an arbitrary slice.
+		browseLimit = BROWSE_STEP;
+		return next;
 	};
 
 	// Show the synced book: when searching, show ALL matches; when browsing, show
@@ -240,12 +345,30 @@
 	// page through the whole book instead of being capped at 50.
 	const BROWSE_STEP = 50;
 	let browseLimit = BROWSE_STEP;
-	$: bookMatches = q ? book.filter((c) => c.name.toLowerCase().includes(q)) : book;
+	// The filters apply to searching as well as browsing: hiding Archived and
+	// then finding an archived person by name would make the filter a lie.
+	$: bookMatches = book.filter(
+		(c) =>
+			!hiddenStatuses.has(statusKey(c.status)) &&
+			!hiddenTypes.has(c.type ?? 'unknown') &&
+			(!q || c.name.toLowerCase().includes(q))
+	);
 	$: bookFiltered = q ? bookMatches : bookMatches.slice(0, browseLimit);
 	$: recentFiltered = $recentClients.filter((c) => !q || c.name.toLowerCase().includes(q));
 	$: attentionFiltered = attention.filter((n) => !q || n.toLowerCase().includes(q));
 	$: openLeads = leads.filter((l) => l.stage === 'enquiry');
 </script>
+
+<!--
+	Always attached rather than bound on open: the toggle button lives inside
+	statusRoot, so the click that opens the panel is inside it and cannot close
+	it again on the same event.
+-->
+<svelte:window
+	on:click={(e) => {
+		if (openFilter && filtersRoot && !filtersRoot.contains(e.target as Node)) openFilter = null;
+	}}
+/>
 
 <div class="max-w-3xl mx-auto px-8 py-10">
 	<div class="flex items-start justify-between gap-4 mb-6">
@@ -287,12 +410,6 @@
 	<p class="text-xs text-gray-400 mb-4">
 		{#if bookJob?.progress}
 			<span class="text-gray-500">{bookJob.progress}</span>
-		{:else if lastBookSuccess}
-			<!-- Deliberately the last SUCCESS, not the last run. After a failed
-			     sync the book really is still nine days old, and saying "synced
-			     just now" because something ran would be a lie the planner acts
-			     on. -->
-			<span class="text-gray-400">Client book last synced {fmtAge(lastBookSuccess)}</span>
 		{:else if book.length === 0}
 			<span class="text-gray-400">Not synced yet</span>
 		{/if}
@@ -303,29 +420,6 @@
 			<span class="text-amber-600">Can’t reach axi’s job list — {$syncJobsError}</span>
 		{/if}
 	</p>
-
-	<!-- Search -->
-	<div class="relative mb-3">
-		<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" class="size-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
-			<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-		</svg>
-		<input
-			bind:value={query}
-			placeholder="Search by client name, or type a new client’s name…"
-			class="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-11 pr-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
-		/>
-	</div>
-
-	<!-- Create-new affordance -->
-	{#if q}
-		<button
-			on:click={createNew}
-			class="w-full flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 transition mb-6"
-		>
-			<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none shrink-0">+</span>
-			<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
-		</button>
-	{/if}
 
 	<!-- Recent -->
 	{#if recentFiltered.length}
@@ -390,16 +484,108 @@
 			</div>
 		{:else}
 			<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
-				<p class="text-sm text-gray-500">No new leads yet. Type a new client’s name above to create one.</p>
+				<p class="text-sm text-gray-500">No new leads yet. Type a new client’s name in the search box below to create one.</p>
 			</div>
 		{/if}
 	</section>
+
+	<!-- Search + filters. Sits directly above the list it acts on: both the
+	     filters and the box narrow the same book, and putting them at the top
+	     of the page separated them from the only thing they change. -->
+	<div class="mt-6 mb-3">
+		<!-- Mirrors XPLAN's own Search Filter, which offers these same two tick
+		     lists over the same book. -->
+		<div class="flex items-center gap-2 mb-2" bind:this={filtersRoot}>
+			{#each filterMenus as f}
+				<div class="relative">
+					<button
+						on:click={() => (openFilter = openFilter === f.key ? null : f.key)}
+						class="flex items-center gap-2 text-sm px-3 py-2 rounded-xl border bg-white dark:bg-gray-900 transition {f.hidden
+							.size
+							? 'border-gray-800 dark:border-gray-300 text-gray-900 dark:text-gray-100'
+							: 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'} hover:border-gray-400 dark:hover:border-gray-500 hover:bg-gray-50 dark:hover:bg-gray-850"
+					>
+						<span class="text-gray-400">{f.label}</span>
+						<span class="font-medium">{summarise(f.options, f.hidden, f.counts, f.labels)}</span>
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+							stroke="currentColor"
+							class="size-4 text-gray-400 transition-transform {openFilter === f.key ? 'rotate-180' : ''}"
+						>
+							<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+						</svg>
+					</button>
+					{#if openFilter === f.key}
+						<div
+							class="absolute left-0 mt-1 z-20 min-w-56 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl py-1"
+						>
+							{#each f.options as o}
+								{@const empty = !f.counts[o]}
+								<button
+									disabled={empty}
+									title={empty ? `No ${f.labels[o].toLowerCase()} in the synced book` : ''}
+									on:click={() =>
+										f.key === 'status'
+											? (hiddenStatuses = toggle(hiddenStatuses, o))
+											: (hiddenTypes = toggle(hiddenTypes, o))}
+									class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-left transition {empty
+										? 'text-gray-300 dark:text-gray-600 cursor-not-allowed'
+										: 'hover:bg-gray-50 dark:hover:bg-gray-850'}"
+								>
+									<input
+										type="checkbox"
+										checked={!empty && !f.hidden.has(o)}
+										disabled={empty}
+										tabindex="-1"
+										class="pointer-events-none size-4"
+									/>
+									<span class="flex-1">{f.labels[o]}</span>
+									<span class="tabular-nums {empty ? '' : 'text-gray-400'}">{f.counts[o] ?? 0}</span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/each}
+		</div>
+		<div class="relative">
+			<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" class="size-5 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
+				<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+			</svg>
+			<input
+				bind:value={query}
+				placeholder="Search by client name, or type a new client’s name…"
+				class="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-11 pr-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
+			/>
+		</div>
+	</div>
+
+	<!-- Create-new affordance. Moved with the search box, not left at the top:
+	     it echoes what was typed, and stranding it away from the input made it
+	     read as an unrelated action. -->
+	{#if q}
+		<button
+			on:click={createNew}
+			class="w-full flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 transition mb-6"
+		>
+			<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none shrink-0">+</span>
+			<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
+		</button>
+	{/if}
 
 	<!-- Your clients (synced book): browse at the bottom; filters when searching -->
 	{#if bookFiltered.length}
 		<section class="mt-6">
 			<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-				{q ? 'Clients' : 'Your clients'} · {q ? bookFiltered.length : `${bookFiltered.length} of ${book.length}`}
+				{q ? 'Clients' : 'Your clients'} · {q
+					? bookFiltered.length
+					: `${bookFiltered.length} of ${bookMatches.length}`}{hiddenStatuses.size ||
+				hiddenTypes.size
+					? ` · filtered from ${book.length}`
+					: ''}{lastBookSuccess ? ` · Client book last synced ${fmtAge(lastBookSuccess)}` : ''}
 			</h2>
 			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden max-h-96 overflow-y-auto">
 				{#each bookFiltered as c}
@@ -415,12 +601,13 @@
 					</button>
 				{/each}
 			</div>
-			{#if !q && browseLimit < book.length}
+			{#if !q && browseLimit < bookMatches.length}
 				<button
 					on:click={() => (browseLimit += BROWSE_STEP)}
 					class="mt-2 w-full text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 rounded-lg border border-gray-200 dark:border-gray-800 py-2 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 				>
-					Show more · {Math.min(BROWSE_STEP, book.length - browseLimit)} of {book.length - browseLimit} remaining
+					Show more · {Math.min(BROWSE_STEP, bookMatches.length - browseLimit)} of {bookMatches.length -
+						browseLimit} remaining
 				</button>
 			{/if}
 		</section>

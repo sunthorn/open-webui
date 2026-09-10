@@ -26,6 +26,7 @@ function stubBook(total: number, opts: { withTotal?: boolean } = {}) {
 				xplanHouseholdId: null,
 				name: `Paged, Client ${offset + i}`,
 				entityStatus: 'client' as const,
+				entityType: 'individual' as const,
 				syncedAt: '2026-09-01T00:00:00Z',
 				deepSyncedAt: null
 			}));

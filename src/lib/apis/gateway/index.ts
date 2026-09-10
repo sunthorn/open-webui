@@ -379,11 +379,24 @@ export type XplanEntityStatus =
 	| 'group_plan_member'
 	| 'unknown';
 
+/**
+ * XPLAN's Type. The book is not a list of people: of 5983 entities, 1166 are
+ * companies, trusts or SMSFs. `null` means the row predates the column.
+ */
+export type XplanEntityType =
+	| 'individual'
+	| 'company'
+	| 'trust'
+	| 'superfund'
+	| 'partnership'
+	| 'unknown';
+
 export interface XplanClientRecord {
 	xplanClientId: string;
 	xplanHouseholdId: string | null;
 	name: string;
 	entityStatus: XplanEntityStatus | null;
+	entityType: XplanEntityType | null;
 	syncedAt: string;
 	deepSyncedAt: string | null;
 }
