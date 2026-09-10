@@ -8,9 +8,9 @@
 	 * layouts — /apps and /x — and in /x it sits in the PARENT, above the
 	 * iframe. The framed apps never see it and stay unaware they are scoped.
 	 */
-	import { goto } from '$app/navigation';
 	import XplanStatusPill from '$lib/components/xplan/XplanStatusPill.svelte';
 	import SyncJobIndicator from '$lib/components/xplan/SyncJobIndicator.svelte';
+	import ClientPicker from './ClientPicker.svelte';
 	import { activeClient, clearActiveClient } from '$lib/apps/activeClient';
 
 	/**
@@ -19,6 +19,8 @@
 	 * /apps layout owns the poll that feeds it. Off unless asked for.
 	 */
 	export let showSyncJobs = false;
+
+	let picking = false;
 </script>
 
 <!-- "Working on" context bar — the active client follows the planner across
@@ -62,7 +64,7 @@
 		<!-- Right edge: what you're working on, with the actions on it.
 		     `ml-auto` pushes this to the right edge whether it shares the
 		     first line with the left group or wraps onto its own. -->
-		<div class="flex items-center gap-3 min-w-0 ml-auto">
+		<div class="relative flex items-center gap-3 min-w-0 ml-auto">
 			{#if $activeClient}
 				<span class="shrink-0 text-gray-400 uppercase tracking-wide text-[11px] font-semibold"
 					>Working on</span
@@ -78,7 +80,7 @@
 				</span>
 				<div class="shrink-0 flex items-center gap-1">
 					<button
-						on:click={() => goto('/apps/clients')}
+						on:click={() => (picking = true)}
 						class="text-xs text-gray-500 hover:text-black dark:hover:text-white px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 					>
 						Change
@@ -94,11 +96,14 @@
 			{:else}
 				<span class="shrink-0 text-gray-500">No client selected</span>
 				<button
-					on:click={() => goto('/apps/clients')}
+					on:click={() => (picking = true)}
 					class="shrink-0 text-xs font-medium text-black dark:text-white px-2.5 py-1 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
 				>
 					Choose a client
 				</button>
+			{/if}
+			{#if picking}
+				<ClientPicker on:close={() => (picking = false)} />
 			{/if}
 		</div>
 	</div>
