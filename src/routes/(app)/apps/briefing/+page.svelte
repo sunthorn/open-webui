@@ -119,6 +119,10 @@
 		</div>
 	</div>
 
+	{#if briefingJob?.progress}
+		<p class="text-xs text-gray-500 -mt-3 mb-5">{briefingJob.progress}</p>
+	{/if}
+
 	{#if err}
 		<div class="mb-5 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">
 			{err}

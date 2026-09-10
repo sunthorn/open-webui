@@ -49,9 +49,6 @@
 		<span class="tabular-nums shrink-0"
 			>{elapsedLabel(current.startedAt, now, current.createdAt)}</span
 		>
-		{#if current.progress}
-			<span class="text-gray-400 truncate">— {current.progress}</span>
-		{/if}
 		{#if waiting > 0}
 			<span class="text-gray-400 shrink-0">+{waiting} queued</span>
 		{/if}

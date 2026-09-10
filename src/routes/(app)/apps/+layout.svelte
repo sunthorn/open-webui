@@ -50,7 +50,7 @@
 		     depends on this today — but the trap is one line away from returning
 		     the moment anything in here floats. -->
 		<div
-			class="relative z-[70] shrink-0 h-11 flex items-center border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-950/40 backdrop-blur text-sm"
+			class="relative z-[70] shrink-0 min-h-11 py-1.5 flex items-center border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-950/40 backdrop-blur text-sm"
 		>
 			<!-- The bar still sits centred, but as a container rather than as a
 			     huddle. `max-w-3xl mx-auto px-8` is the same container every /apps
@@ -58,8 +58,15 @@
 			     page's left margin and the Change/clear pair ends on its right
 			     margin -- instead of the whole group floating in the middle with
 			     nothing under it lining up. Every /apps page now uses this same
-			     width -- data-entry was the last 4xl holdout. -->
-			<div class="w-full max-w-3xl mx-auto px-8 flex items-center justify-between gap-3">
+			     width -- data-entry was the last 4xl holdout.
+
+			     `flex-wrap` + `ml-auto` on the right group (not `justify-between`):
+			     neither side can shrink below its own content (a running sync's
+			     label, an active client's name), so when both are present at once
+			     they no longer fit on one line — the right group drops to its own
+			     line and stays right-aligned there instead of rendering on top of
+			     the left group. -->
+			<div class="w-full max-w-3xl mx-auto px-8 flex flex-wrap items-center gap-x-3 gap-y-1">
 				<!-- Left edge: XPLAN connection + access, then whatever is running.
 				     Both are "state of the link", and both belong on every page. -->
 				<div class="flex items-center gap-3 min-w-0">
@@ -69,8 +76,10 @@
 					<SyncJobIndicator />
 				</div>
 
-				<!-- Right edge: what you're working on, with the actions on it. -->
-				<div class="flex items-center gap-3 min-w-0">
+				<!-- Right edge: what you're working on, with the actions on it.
+				     `ml-auto` pushes this to the right edge whether it shares the
+				     first line with the left group or wraps onto its own. -->
+				<div class="flex items-center gap-3 min-w-0 ml-auto">
 					{#if $activeClient}
 						<span class="shrink-0 text-gray-400 uppercase tracking-wide text-[11px] font-semibold"
 							>Working on</span

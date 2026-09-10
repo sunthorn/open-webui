@@ -223,6 +223,9 @@
 					{/if}
 				</div>
 			</div>
+			{#if overviewJob?.progress}
+				<p class="text-xs text-gray-500 mb-2">{overviewJob.progress}</p>
+			{/if}
 			{#if overviewErr}
 				<p class="text-xs text-red-600 dark:text-red-400 mb-2">{overviewErr}</p>
 			{/if}
@@ -279,6 +282,9 @@
 				</div>
 			</div>
 
+			{#if briefingJob?.progress}
+				<p class="text-xs text-gray-500 mb-2">{briefingJob.progress}</p>
+			{/if}
 			{#if briefingErr}
 				<p class="text-xs text-red-600 dark:text-red-400 mb-2">{briefingErr}</p>
 			{/if}
