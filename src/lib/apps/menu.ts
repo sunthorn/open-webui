@@ -75,6 +75,8 @@ export const ICON = {
 	gauge: 'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z',
 	shield:
 		'M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z',
+	/** book-open. The knowledge base, not a single document. */
+	book: 'M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25',
 	note: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z',
 	/** three lines with knobs -- adjustments-horizontal. Options, never the gear. */
 	sliders:
@@ -178,50 +180,58 @@ export const APPS: AppDef[] = [
 			},
 			{
 				kind: 'link',
-				id: 'salem-connections',
-				label: 'Connections',
-				href: '/x/salem/connectors',
-				icon: ICON.link
+				id: 'salem-knowledge',
+				// Raven, in salem's own naming. This is the read side of
+				// Connections: utils/sourceTypes.ts buckets the page by connector
+				// -- Upload, Google, Microsoft, IMAP, Meetings, SQL -- so it is
+				// where synced content actually becomes visible.
+				//
+				// It was unlisted for a while, reachable only by clicking a note
+				// backlink (WikiLink.tsx navigates to /kb?source=...). That left
+				// no way to answer "did my mailbox sync, and what landed?" except
+				// by already knowing what to look for. The Connectors page reports
+				// a count and a Ready badge; it does not show contents.
+				label: 'Knowledge',
+				href: '/x/salem/kb',
+				icon: ICON.book
 			},
 			{ kind: 'divider' },
 			optionsRow('salem')
 		],
+		// Root is what you DO here — record, write up, and read back what has
+		// been ingested. Everything that CONFIGURES salem lives below.
 		options: [
-			// No "Meeting note templates" row yet. salem has the full CRUD API at
-			// /api/templates and the meeting UI picks from it, but there is no page
-			// to manage them — so the row pointed at /settings/templates, which is
-			// not a route. salem's catch-all then rendered the chat shell, which is
-			// why it looked like the menu was navigating to the wrong place.
-			// It is the obvious first thing to build in this panel.
+			// Connections was a root row until it wasn't: connecting a mailbox is
+			// something you do once and forget, not a place you go. It reads as a
+			// peer of Meetings and Notes only because it used to be the only other
+			// page. Options is where it belongs.
+			//
+			// It also used to have a twin here called "Connected accounts", which
+			// pointed at /settings/connections -- four hardcoded cards, every
+			// button disabled, no hook and no endpoint behind any of them. Two
+			// rows, one real page, and the mock was the one in this menu. Deleted;
+			// this row is the survivor and now the only thing called Connections.
 			{
 				kind: 'link',
-				id: 'salem-my-connections',
-				label: 'Connected accounts',
-				href: '/x/salem/settings/connections',
+				id: 'salem-connections',
+				label: 'Connections',
+				href: '/x/salem/connectors',
 				icon: ICON.link
-			},
-			{ kind: 'label', label: 'Admin' },
-			{
-				kind: 'link',
-				id: 'salem-admin-dashboard',
-				label: 'Dashboard',
-				href: '/x/salem/settings/admin/dashboard',
-				icon: ICON.chart
-			},
-			{
-				kind: 'link',
-				id: 'salem-admin-usage',
-				label: 'Usage',
-				href: '/x/salem/settings/admin/usage',
-				icon: ICON.gauge
-			},
-			{
-				kind: 'link',
-				id: 'salem-admin-logs',
-				label: 'Logs',
-				href: '/x/salem/settings/admin/logs',
-				icon: ICON.scroll
 			}
+			// Meeting note templates belongs here next. salem has the full CRUD API
+			// at /api/templates and the meeting UI already picks from it, but there
+			// is no page to manage them -- the old row pointed at /settings/templates,
+			// which is not a route, so salem's catch-all rendered the chat shell and
+			// it looked like the menu was navigating to the wrong place. Build the
+			// page, then add the row back.
+			//
+			// No Admin group either. salem grew its own Dashboard/Usage/Logs back
+			// when it was a standalone product with its own login. It still is one,
+			// deployed on its own, and there that menu survives -- see Settings.tsx,
+			// which gates it on isEmbedded() rather than deleting it. Inside axi it
+			// is a second admin area: /admin already owns users, analytics and
+			// settings for the whole shell, and putting system concerns behind one
+			// app's Options split "who is an admin" in two.
 		]
 	},
 	{
