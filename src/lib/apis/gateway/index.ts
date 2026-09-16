@@ -70,6 +70,7 @@ export interface DailyBriefing {
 	owner: string;
 	compiledAt: string;
 	sources: string[];
+	narrative?: string;
 	needsAttention: BriefingItem[];
 	today: BriefingItem[];
 	tomorrow: BriefingItem[];
