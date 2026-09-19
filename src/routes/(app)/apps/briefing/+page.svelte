@@ -2,16 +2,23 @@
 	// Briefing — the planner's day. Two GETs, no LLM on load: /gw/agenda
 	// (three sources merged, client-matched) and briefing:daily (the agent's
 	// narrative, when one exists). Spec: docs/superpowers/specs/
-	// 2026-09-14-briefing-home-design.md §10. Writes and pins land in Plan B.
+	// 2026-09-14-briefing-home-design.md §10. Writes go through the confirm →
+	// POST → re-fetch flow below; pins and the agent's suggestions are edited
+	// inline.
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { page } from '$app/stores';
 	import { getBriefing, openInXplan, type DailyBriefing } from '$lib/apis/gateway';
 	import {
 		getAgenda, getConnectors, authorizeConnector, disconnectConnector, isoDate,
+		completeTask, snoozeTask, moveEvent, putPin, deletePins,
 		type AgendaResponse, type AgendaEvent, type AgendaTask, type ConnectorsResponse, type ConnectorProvider
 	} from '$lib/apis/gateway/agenda';
-	import { fallbackAttention, sourceCalendars, toCalendarEvents } from '$lib/apps/agenda';
+	import {
+		fallbackAttention, sourceCalendars, toCalendarEvents,
+		snoozeUntil, describeChange, applyChange, type AgendaChange
+	} from '$lib/apps/agenda';
+	import ClientPicker from '$lib/components/apps/ClientPicker.svelte';
 	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import CalendarView from '$lib/components/calendar/CalendarView.svelte';
 	import SourceChips from '$lib/components/agenda/SourceChips.svelte';
@@ -33,6 +40,8 @@
 	let view: 'today' | 'week' = 'today';
 	let selected: AgendaEvent | null = null;
 	let greeting = 'Hello';
+	let busyId: string | null = null;
+	let assigning: AgendaTask | AgendaEvent | null = null;
 
 	$: xplanLocked = agenda?.sources.xplan?.status === 'locked';
 	$: sourceErrors = Object.entries(agenda?.sources ?? {}).filter(([, s]) => s?.status === 'error') as [string, { message?: string }][];
@@ -40,6 +49,11 @@
 	$: weekEvents = agenda ? toCalendarEvents(agenda.events) : [];
 	const calendars = sourceCalendars();
 	const visible = new Set(calendars.map((c) => c.id));
+
+	// Keeps the open event panel showing the current agenda's copy of the
+	// selected event — after a write, a reload, or a rollback — instead of a
+	// stale snapshot from before the change.
+	const resync = () => { if (selected && agenda) selected = agenda.events.find((e) => e.id === selected!.id) ?? selected; };
 
 	const load = async (refresh = false) => {
 		loading = true;
@@ -50,6 +64,7 @@
 				getConnectors(token()).catch(() => null),
 				getBriefing(token()).catch(() => null)
 			]);
+			resync();
 		} catch (e: any) {
 			loadError = e?.message ?? 'Could not load your agenda';
 		} finally {
@@ -90,19 +105,62 @@
 		}
 	};
 
+	// The write flow (spec §10): confirm the exact change → apply it to the
+	// page → POST → re-fetch. On error, put the page back and show the
+	// gateway's one-line reason. One item per call; no bulk.
+	const post = (c: AgendaChange): Promise<unknown> => {
+		const t = token();
+		switch (c.kind) {
+			case 'complete': return completeTask(t, c.task.source, c.task.sourceId);
+			case 'snooze': return snoozeTask(t, c.task.source, c.task.sourceId, c.until);
+			case 'move': return moveEvent(t, c.event.source, c.event.sourceId, c.startAt, c.endAt);
+			case 'pin': return putPin(t, { source: c.item.source, sourceId: c.item.sourceId, clientId: c.clientId, verdict: 'match' });
+			case 'reject': return putPin(t, { source: c.task.source, sourceId: c.task.sourceId, clientId: c.clientId, verdict: 'reject' });
+			case 'unpin': return deletePins(t, c.item.source, c.item.sourceId);
+		}
+	};
+	const itemOf = (c: AgendaChange) => ('task' in c ? c.task : 'event' in c ? c.event : c.item);
+	const run = async (c: AgendaChange) => {
+		if (!agenda || !confirm(describeChange(c))) return;
+		err = '';
+		const before = agenda;
+		busyId = itemOf(c).id;
+		agenda = applyChange(agenda, c);
+		resync();
+		try {
+			await post(c);
+			await load(true);
+		} catch (e: any) {
+			agenda = before;
+			resync();
+			err = e?.message ?? 'The change did not go through';
+		} finally {
+			busyId = null;
+		}
+	};
+	const pick = (e: CustomEvent<{ id: string; name: string }>) => {
+		const item = assigning;
+		assigning = null;
+		if (item) void run({ kind: 'pin', item, clientId: e.detail.id, clientName: e.detail.name });
+	};
+
 	// The XPLAN re-read is a worker job (spends tokens). Same wiring the old page had.
 	const reread = async () => {
 		err = '';
+		jobNote = '';
 		const started = await startJob(token(), 'briefing');
 		if (!started) err = get(syncJobsError) ?? 'Could not start the re-read.';
 	};
 	$: briefingJob = runningJob($syncJobs, 'briefing');
 	$: lastRun = $syncJobs.last.briefing;
 	let seenRun = '';
+	let jobNote = '';
 	$: if (lastRun && lastRun.id !== seenRun) {
 		seenRun = lastRun.id;
-		if (lastRun.status === 'done') void load(true);
-		else if (lastRun.status !== 'cancelled') err = lastRun.error ?? '';
+		if (lastRun.status === 'done') {
+			jobNote = lastRun.error ?? '';
+			void load(true);
+		} else if (lastRun.status !== 'cancelled') err = lastRun.error ?? '';
 	}
 
 	onMount(() => {
@@ -141,6 +199,7 @@
 	</div>
 
 	{#if briefingJob?.progress}<p class="text-xs text-gray-500 -mt-3 mb-4">{briefingJob.progress}</p>{/if}
+	{#if jobNote}<p class="text-xs text-amber-700 dark:text-amber-300 -mt-3 mb-4">{jobNote}</p>{/if}
 	{#if err}<div class="mb-4 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">{err}</div>{/if}
 	{#each sourceErrors as [src, s]}
 		<div class="mb-2 text-sm text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl px-4 py-2">
@@ -159,10 +218,15 @@
 	{:else if agenda}
 		<div class="space-y-8">
 			<section>
-				<h2 class="text-xs font-semibold uppercase tracking-wide mb-3 text-red-600 dark:text-red-400">⚠ Needs attention</h2>
+				<div class="flex items-center justify-between mb-3">
+					<h2 class="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">⚠ Needs attention</h2>
+					<button on:click={reread} disabled={!!briefingJob || xplanLocked}
+						title="Re-reads XPLAN and asks the agent for its view (the same job as Re-read)"
+						class="text-xs text-gray-500 underline disabled:opacity-50">{briefingJob ? 'Rebuilding…' : 'Rebuild'}</button>
+				</div>
 				{#if briefing?.narrative}
 					<div class="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 text-sm whitespace-pre-line">{briefing.narrative}</div>
-					<p class="text-xs text-gray-400 mt-1">compiled {compiledLabel(briefing.compiledAt)}</p>
+					<p class="text-xs text-gray-400 mt-1">the agent's view, from your calendars and XPLAN · compiled {compiledLabel(briefing.compiledAt)}</p>
 				{:else if attention.length}
 					<ul class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
 						{#each attention as t (t.id)}
@@ -172,7 +236,7 @@
 							</li>
 						{/each}
 					</ul>
-					<p class="text-xs text-gray-400 mt-1">rules only — the agent's narrative arrives in Plan B</p>
+					<p class="text-xs text-gray-400 mt-1">rules only — rebuild for the agent's view</p>
 				{:else}
 					<p class="text-sm text-gray-500">Nothing overdue or due today.</p>
 				{/if}
@@ -198,19 +262,38 @@
 						{/if}
 					</div>
 					{#if selected}
-						<EventPanel event={selected} {xplanLocked} on:close={() => (selected = null)} on:open={(e) => open(e.detail)} />
+						<EventPanel event={selected} {xplanLocked} busy={busyId === selected.id}
+							on:close={() => (selected = null)} on:open={(e) => open(e.detail)}
+							on:move={(e) => run({ kind: 'move', ...e.detail })}
+							on:assign={(e) => (assigning = e.detail)}
+							on:unpin={(e) => run({ kind: 'unpin', item: e.detail })} />
 					{/if}
 				</div>
 			</section>
 
 			<section>
 				<h2 class="text-xs font-semibold uppercase tracking-wide mb-3 text-gray-500">To do, by client</h2>
-				<TodoByClient tasks={agenda.tasks} {today} {xplanLocked} on:open={(e) => open(e.detail)} />
+				<TodoByClient tasks={agenda.tasks} {today} {xplanLocked} {busyId} on:open={(e) => open(e.detail)}
+					on:complete={(e) => run({ kind: 'complete', task: e.detail })}
+					on:snooze={(e) => run({ kind: 'snooze', task: e.detail.task, until: snoozeUntil(today, e.detail.choice) })}
+					on:accept={(e) => e.detail.suggestion && run({ kind: 'pin', item: e.detail, clientId: e.detail.suggestion.clientId, clientName: e.detail.suggestion.name })}
+					on:reject={(e) => e.detail.suggestion && run({ kind: 'reject', task: e.detail, clientId: e.detail.suggestion.clientId, clientName: e.detail.suggestion.name })}
+					on:assign={(e) => (assigning = e.detail)}
+					on:unpin={(e) => run({ kind: 'unpin', item: e.detail })} />
 			</section>
 
 			<p class="text-xs text-gray-400">
 				Agenda compiled {compiledLabel(agenda.compiledAt)}{#if agenda.sources.xplan?.readAt} · XPLAN last read {compiledLabel(agenda.sources.xplan.readAt)}{/if}. Chats stay in axi's native history.
 			</p>
+		</div>
+	{/if}
+
+	{#if assigning}
+		<div class="fixed inset-0 z-40 bg-black/30 flex items-start justify-center pt-24" role="dialog" aria-label="Assign client">
+			<div class="relative w-80">
+				<p class="text-xs text-white/90 mb-1 truncate">Assign "{assigning.title}" to…</p>
+				<ClientPicker mode="pick" placeholder="Search the client book…" on:pick={pick} on:close={() => (assigning = null)} />
+			</div>
 		</div>
 	{/if}
 </div>

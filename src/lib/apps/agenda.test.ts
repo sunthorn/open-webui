@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
 	groupTasks, timelineRange, placeEvent, eventsOn, allDayOn, toCalendarEvents,
-	sourceCalendars, fallbackAttention, localDay, SOURCE_META
+	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel
 } from './agenda';
-import type { AgendaEvent, AgendaTask } from '$lib/apis/gateway/agenda';
+import type { AgendaEvent, AgendaTask, AgendaResponse } from '$lib/apis/gateway/agenda';
 
 const task = (over: Partial<AgendaTask>): AgendaTask => ({
 	id: 'google:l~x', source: 'google', sourceId: 'l~x', title: 't', status: 'open',
@@ -142,5 +142,108 @@ describe('localDay', () => {
 	it('uses the browser zone', () => {
 		expect(localDay(local(2026, 9, 14, 23, 30))).toBe('2026-09-14');
 		expect(localDay('2026-09-14')).toBe('2026-09-14');
+	});
+});
+
+const agendaOf = (tasks: AgendaTask[], events: AgendaEvent[] = []): AgendaResponse => ({
+	from: TODAY, to: '2026-09-21', compiledAt: 'x', tasks, events,
+	sources: { xplan: { status: 'ok' }, m365: { status: 'ok' }, google: { status: 'ok' } }
+});
+
+describe('snoozeUntil', () => {
+	it('adds a day or a week in calendar terms', () => {
+		expect(snoozeUntil('2026-09-14', 'tomorrow')).toBe('2026-09-15');
+		expect(snoozeUntil('2026-09-14', 'nextWeek')).toBe('2026-09-21');
+		expect(snoozeUntil('2026-09-30', 'tomorrow')).toBe('2026-10-01');
+		expect(snoozeUntil('2026-12-28', 'nextWeek')).toBe('2027-01-04');
+	});
+});
+
+describe('describeChange', () => {
+	it('names the item, the source and the exact change', () => {
+		const t = task({ title: 'Send SOA', source: 'google' });
+		expect(describeChange({ kind: 'complete', task: t })).toBe('Mark "Send SOA" as done in Google?');
+		expect(describeChange({ kind: 'snooze', task: t, until: '2026-09-21' })).toContain('2026-09-21');
+		const e = event({ title: 'Review', source: 'm365' });
+		const s = describeChange({ kind: 'move', event: e, startAt: local(2026, 9, 21, 9), endAt: local(2026, 9, 21, 10) });
+		expect(s).toContain('"Review"'); expect(s).toContain('Outlook');
+		expect(describeChange({ kind: 'pin', item: t, clientId: '1', clientName: 'Smith, Jo' })).toBe('Assign "Send SOA" to Smith, Jo?');
+		expect(describeChange({ kind: 'reject', task: t, clientId: '1', clientName: 'Smith, Jo' })).toContain('Smith, Jo');
+		expect(describeChange({ kind: 'unpin', item: t })).toContain('Send SOA');
+	});
+});
+
+describe('applyChange', () => {
+	const t1 = task({ id: 'google:l~1', sourceId: 'l~1', title: 'a', dueAt: '2026-09-14', suggestion: { clientId: '9', name: 'X', confidence: 0.7 } });
+	const t2 = task({ id: 'google:l~2', sourceId: 'l~2', title: 'b', status: 'overdue', dueAt: '2026-09-01', client: { id: '5', name: 'Lee', via: 'pin' } });
+	const e1 = event({ id: 'm365:e', client: { id: '5', name: 'Lee', via: 'rule' } });
+	const base = agendaOf([t1, t2], [e1]);
+
+	it('complete removes the task', () => {
+		const out = applyChange(base, { kind: 'complete', task: t1 });
+		expect(out.tasks.map((t) => t.id)).toEqual(['google:l~2']);
+		expect(base.tasks).toHaveLength(2); // input untouched
+	});
+
+	it('snooze moves the due date and clears overdue', () => {
+		const out = applyChange(base, { kind: 'snooze', task: t2, until: '2026-09-21' });
+		expect(out.tasks[1]).toMatchObject({ dueAt: '2026-09-21', status: 'open' });
+		expect(base.tasks[1].status).toBe('overdue');
+	});
+
+	it('move rewrites the window', () => {
+		const out = applyChange(base, { kind: 'move', event: e1, startAt: 'S', endAt: 'E' });
+		expect(out.events[0]).toMatchObject({ startAt: 'S', endAt: 'E' });
+	});
+
+	it('pin sets a planner client and drops the suggestion; reject drops only the suggestion; unpin clears the client', () => {
+		const pinned = applyChange(base, { kind: 'pin', item: t1, clientId: '7', clientName: 'Nguyen' });
+		expect(pinned.tasks[0].client).toEqual({ id: '7', name: 'Nguyen', via: 'pin' });
+		expect(pinned.tasks[0].suggestion).toBeUndefined();
+		const rejected = applyChange(base, { kind: 'reject', task: t1, clientId: '9', clientName: 'X' });
+		expect(rejected.tasks[0].suggestion).toBeUndefined();
+		expect(rejected.tasks[0].client).toBeUndefined();
+		const cleared = applyChange(base, { kind: 'unpin', item: e1 });
+		expect(cleared.events[0].client).toBeUndefined();
+	});
+
+	it('pin works on an event and unpin on a task; reject keeps an existing client', () => {
+		const pinnedEvent = applyChange(base, { kind: 'pin', item: e1, clientId: '7', clientName: 'Nguyen' });
+		expect(pinnedEvent.events[0].client).toEqual({ id: '7', name: 'Nguyen', via: 'pin' });
+		expect(base.events[0].client).toEqual({ id: '5', name: 'Lee', via: 'rule' }); // input untouched
+		const unpinnedTask = applyChange(base, { kind: 'unpin', item: t2 });
+		expect(unpinnedTask.tasks[1].client).toBeUndefined();
+		expect(unpinnedTask.tasks[1].title).toBe('b');
+		const withBoth = task({ id: 'google:l~9', sourceId: 'l~9', title: 'both', client: { id: '5', name: 'Lee', via: 'rule' }, suggestion: { clientId: '9', name: 'X', confidence: 0.7 } });
+		const rejected = applyChange(agendaOf([withBoth]), { kind: 'reject', task: withBoth, clientId: '9', clientName: 'X' });
+		expect(rejected.tasks[0].suggestion).toBeUndefined();
+		expect(rejected.tasks[0].client).toEqual({ id: '5', name: 'Lee', via: 'rule' });
+	});
+});
+
+describe('moveWindow / toLocalInput', () => {
+	it('round-trips a local datetime and emits an offset the gateway accepts', () => {
+		const iso = local(2026, 9, 21, 9, 30);
+		const input = toLocalInput(iso);
+		expect(input).toMatch(/^2026-09-21T09:30$/);
+		const out = moveWindow(input, toLocalInput(local(2026, 9, 21, 10)));
+		expect('startAt' in out && out.startAt).toBe(new Date(iso).toISOString().replace('Z', '+00:00'));
+	});
+
+	it('rejects an empty or backwards window', () => {
+		expect(moveWindow('', '2026-09-21T10:00')).toEqual({ error: 'Pick a start and an end time' });
+		expect(moveWindow('2026-09-21T10:00', '2026-09-21T09:00')).toEqual({ error: 'End must be after start' });
+	});
+
+	it('rejects a malformed datetime', () => {
+		expect(moveWindow('not-a-date', '2026-09-21T10:00')).toEqual({ error: 'Pick a start and an end time' });
+	});
+});
+
+describe('clientLabel', () => {
+	it('names who said so', () => {
+		expect(clientLabel('pin')).toBe('pinned by you');
+		expect(clientLabel('rule')).toBe('matched by rule');
+		expect(clientLabel('agent')).toBe('suggested by the agent');
 	});
 });

@@ -27,7 +27,16 @@
 	import { mergeRows, type PickerRow } from '$lib/apps/clientSearch';
 	import { listClients } from '$lib/apis/gateway';
 
-	const dispatch = createEventDispatcher<{ close: void }>();
+	/**
+	 * 'switch' (default): choosing a row makes that client the active client —
+	 * the context bar's job. 'pick': choosing a row only reports it; the
+	 * Briefing page uses this to pin an agenda item to a client without
+	 * changing who the planner is "with" (spec §10 item 4, "⋯ assign").
+	 */
+	export let mode: 'switch' | 'pick' = 'switch';
+	export let placeholder = 'Search clients…';
+
+	const dispatch = createEventDispatcher<{ close: void; pick: { id: string; name: string } }>();
 
 	let query = '';
 	let results: { id: string; name: string }[] = [];
@@ -82,12 +91,12 @@
 	};
 
 	const choose = (row: PickerRow) => {
-		setActiveClient({
-			id: row.id,
-			name: row.name,
-			mode: 'existing',
-			since: new Date().toISOString()
-		});
+		if (mode === 'pick') {
+			dispatch('pick', { id: row.id, name: row.name });
+			dispatch('close');
+			return;
+		}
+		setActiveClient({ id: row.id, name: row.name, mode: 'existing', since: new Date().toISOString() });
 		dispatch('close');
 	};
 
@@ -105,7 +114,7 @@
 			bind:this={input}
 			bind:value={query}
 			on:input={onInput}
-			placeholder="Search clients…"
+			placeholder={placeholder}
 			class="w-full px-2 py-1.5 text-sm rounded-lg bg-gray-50 dark:bg-gray-850 outline-none"
 		/>
 	</div>

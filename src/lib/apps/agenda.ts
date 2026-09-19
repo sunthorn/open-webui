@@ -1,6 +1,6 @@
 // Pure logic behind the Briefing page. No Svelte, no fetch — so vitest can
 // hold it to account. Rendering lives in src/lib/components/agenda/*.
-import type { AgendaEvent, AgendaSource, AgendaTask } from '$lib/apis/gateway/agenda';
+import type { AgendaEvent, AgendaResponse, AgendaSource, AgendaTask, ClientVia } from '$lib/apis/gateway/agenda';
 import { isoDate } from '$lib/apis/gateway/agenda';
 import type { CalendarEventModel, CalendarModel } from '$lib/apis/calendar';
 
@@ -138,3 +138,103 @@ export const fallbackAttention = (tasks: AgendaTask[], today: string): AgendaTas
 	const dueToday = tasks.filter((t) => t.status !== 'overdue' && t.dueAt?.slice(0, 10) === today).sort(byDue);
 	return [...overdue, ...dueToday].slice(0, 6);
 };
+
+// --- writes: what the planner is about to change, and what the page shows
+// while the gateway does it. The page confirms with describeChange(), applies
+// applyChange() optimistically, POSTs, then re-fetches (spec §10 write flow).
+
+export type AgendaChange =
+	| { kind: 'complete'; task: AgendaTask }
+	| { kind: 'snooze'; task: AgendaTask; until: string }
+	| { kind: 'move'; event: AgendaEvent; startAt: string; endAt: string }
+	| { kind: 'pin'; item: AgendaTask | AgendaEvent; clientId: string; clientName: string }
+	| { kind: 'reject'; task: AgendaTask; clientId: string; clientName: string }
+	| { kind: 'unpin'; item: AgendaTask | AgendaEvent };
+
+const addDays = (day: string, n: number): string => {
+	const [y, m, d] = day.split('-').map(Number);
+	return isoDate(new Date(y, m - 1, d + n));
+};
+
+export const snoozeUntil = (today: string, choice: 'tomorrow' | 'nextWeek'): string =>
+	addDays(today, choice === 'tomorrow' ? 1 : 7);
+
+const dayLabel = (day: string): string =>
+	new Date(`${day}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+
+const timeLabel = (iso: string): string =>
+	new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+export const describeChange = (c: AgendaChange): string => {
+	switch (c.kind) {
+		case 'complete':
+			return `Mark "${c.task.title}" as done in ${SOURCE_META[c.task.source].label}?`;
+		case 'snooze':
+			return `Move "${c.task.title}" to ${dayLabel(c.until)} (${c.until}) in ${SOURCE_META[c.task.source].label}?`;
+		case 'move':
+			return `Move "${c.event.title}" to ${timeLabel(c.startAt)} – ${new Date(c.endAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} in ${SOURCE_META[c.event.source].label}?`;
+		case 'pin':
+			return `Assign "${c.item.title}" to ${c.clientName}?`;
+		case 'reject':
+			return `Not ${c.clientName}? "${c.task.title}" won't be suggested for them again.`;
+		case 'unpin':
+			return `Clear the client on "${c.item.title}"? The rules will re-match it on refresh.`;
+	}
+};
+
+const mapTask = (a: AgendaResponse, id: string, f: (t: AgendaTask) => AgendaTask | null): AgendaResponse => ({
+	...a,
+	tasks: a.tasks.flatMap((t) => {
+		if (t.id !== id) return [t];
+		const next = f(t);
+		return next ? [next] : [];
+	})
+});
+const mapEvent = (a: AgendaResponse, id: string, f: (e: AgendaEvent) => AgendaEvent): AgendaResponse => ({
+	...a,
+	events: a.events.map((e) => (e.id === id ? f(e) : e))
+});
+const isTask = (i: AgendaTask | AgendaEvent): i is AgendaTask => 'status' in i;
+
+export const applyChange = (a: AgendaResponse, c: AgendaChange): AgendaResponse => {
+	switch (c.kind) {
+		case 'complete':
+			return mapTask(a, c.task.id, () => null);
+		case 'snooze':
+			return mapTask(a, c.task.id, (t) => ({ ...t, dueAt: c.until, status: 'open' }));
+		case 'move':
+			return mapEvent(a, c.event.id, (e) => ({ ...e, startAt: c.startAt, endAt: c.endAt }));
+		case 'pin': {
+			const client = { id: c.clientId, name: c.clientName, via: 'pin' as const };
+			return isTask(c.item)
+				? mapTask(a, c.item.id, (t) => { const { suggestion: _s, ...rest } = t; return { ...rest, client }; })
+				: mapEvent(a, c.item.id, (e) => ({ ...e, client }));
+		}
+		case 'reject':
+			return mapTask(a, c.task.id, (t) => { const { suggestion: _s, ...rest } = t; return rest; });
+		case 'unpin':
+			return isTask(c.item)
+				? mapTask(a, c.item.id, (t) => { const { client: _c, ...rest } = t; return rest; })
+				: mapEvent(a, c.item.id, (e) => { const { client: _c, ...rest } = e; return rest; });
+	}
+};
+
+/** ISO (any offset) → the local 'YYYY-MM-DDTHH:mm' a datetime-local input wants. */
+export const toLocalInput = (iso: string): string => {
+	const d = new Date(iso);
+	const p = (n: number) => String(n).padStart(2, '0');
+	return `${isoDate(d)}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+/** Two datetime-local values → ISO with an explicit offset (the gateway refuses naive times). */
+export const moveWindow = (startLocal: string, endLocal: string): { startAt: string; endAt: string } | { error: string } => {
+	if (!startLocal || !endLocal) return { error: 'Pick a start and an end time' };
+	const s = new Date(startLocal), e = new Date(endLocal);
+	if (isNaN(s.getTime()) || isNaN(e.getTime())) return { error: 'Pick a start and an end time' };
+	if (e <= s) return { error: 'End must be after start' };
+	const iso = (d: Date) => d.toISOString().replace('Z', '+00:00');
+	return { startAt: iso(s), endAt: iso(e) };
+};
+
+export const clientLabel = (via: ClientVia): string =>
+	via === 'pin' ? 'pinned by you' : via === 'agent' ? 'suggested by the agent' : 'matched by rule';

@@ -58,7 +58,7 @@
 {#if confirmFull}
 	<div class="mt-2 text-xs rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 p-2.5">
 		<p class="text-amber-800 dark:text-amber-300">
-			This lets the agent <strong>change client records</strong> in XPLAN. Continue?
+			Full will let axi <strong>change records in XPLAN</strong>. No write action exists yet — today this level behaves like Read-only. Continue?
 		</p>
 		<div class="mt-2 flex gap-2">
 			<button
