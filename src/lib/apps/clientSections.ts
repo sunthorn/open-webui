@@ -20,14 +20,33 @@ export const SECTION_GROUPS: SectionGroup[] = [
 	{
 		key: 'client',
 		label: 'Client',
-		sections: ['key_details', 'habits', 'contact', 'employment', 'dependants',
-			'identity', 'domicile', 'category', 'notes', 'client_report']
+		sections: [
+			'key_details',
+			'habits',
+			'contact',
+			'employment',
+			'dependants',
+			'identity',
+			'domicile',
+			'category',
+			'notes',
+			'client_report'
+		]
 	},
 	{
 		key: 'financial',
 		label: 'Financial',
-		sections: ['cashflow', 'balancesheet', 'net_value', 'balance_sheet_custom',
-			'budget', 'annuities', 'super', 'estate', 'centrelink']
+		sections: [
+			'cashflow',
+			'balancesheet',
+			'net_value',
+			'balance_sheet_custom',
+			'budget',
+			'annuities',
+			'super',
+			'estate',
+			'centrelink'
+		]
 	},
 	{
 		key: 'insurance',
@@ -74,18 +93,62 @@ export const sectionLabel = (section: string) =>
 // STALE — the one thing a planner must know before acting on a number.
 export const isStale = (s: XplanClientSection) => s.status === 'changed' || s.status === 'error';
 
+/** One table the page scraper found, before any map decided where it belongs. */
+export type CapturedPanel = { heading: string; headers: string[]; rows: Record<string, string>[] };
+
+// XPLAN factfind pages carry inline <script> blocks whose text the scraper
+// picks up as the nearest "heading" of the following table. Nothing a
+// planner can read starts with a CDATA marker or a jQuery call.
+const SCRIPT_HEADING = /^\s*(\/\/\s*<!\[CDATA\[|jQuery\s*\(|\$\s*\()/;
+
+/**
+ * The panels `deep_sync` captured but no verified map has promoted into
+ * `rows` yet — what the planner sees while the map workflow is still to be
+ * run for this tenant. Order is the stored (document) order; panels with
+ * no rows and anything not panel-shaped are left out.
+ */
+export const unmappedPanels = (s: XplanClientSection): CapturedPanel[] =>
+	Object.values(s.unmapped ?? {}).flatMap((v) => {
+		const p = v as Partial<CapturedPanel> | null;
+		if (!p || typeof p !== 'object' || !Array.isArray(p.rows) || !p.rows.length) return [];
+		const heading = typeof p.heading === 'string' ? p.heading : '';
+		if (SCRIPT_HEADING.test(heading)) return [];
+		// The scraper keys a cell whose header is blank as `col<i>` — mirror
+		// that so the row lookup still finds the value.
+		const headers =
+			Array.isArray(p.headers) && p.headers.length
+				? p.headers.map((h, i) => h || `col${i}`)
+				: Object.keys(p.rows[0] ?? {});
+		return [{ heading, headers, rows: p.rows }];
+	});
+
 export type Dot = 'current' | 'empty' | 'stale' | 'error';
 
 const DOT_RANK: Record<Dot, number> = { empty: 0, current: 1, stale: 2, error: 3 };
 
 const dotOf = (s: XplanClientSection): Dot =>
-	s.status === 'error' ? 'error' : s.status === 'changed' ? 'stale' : s.status === 'ok' ? 'current' : 'empty';
+	s.status === 'error'
+		? 'error'
+		: s.status === 'changed'
+			? 'stale'
+			: s.status === 'ok'
+				? 'current'
+				: 'empty';
 
 /** One dot for a section that a couple may have read twice: the worst wins. */
 export const sectionDot = (rows: XplanClientSection[]): Dot =>
-	rows.reduce<Dot>((worst, s) => (DOT_RANK[dotOf(s)] > DOT_RANK[worst] ? dotOf(s) : worst), 'empty');
+	rows.reduce<Dot>(
+		(worst, s) => (DOT_RANK[dotOf(s)] > DOT_RANK[worst] ? dotOf(s) : worst),
+		'empty'
+	);
 
-export type RailEntry = { section: string; label: string; dot: Dot; rowCount: number; read: boolean };
+export type RailEntry = {
+	section: string;
+	label: string;
+	dot: Dot;
+	rowCount: number;
+	read: boolean;
+};
 export type RailGroup = { key: SectionGroup['key']; label: string; entries: RailEntry[] };
 
 const entry = (section: string, rows: XplanClientSection[]): RailEntry => ({

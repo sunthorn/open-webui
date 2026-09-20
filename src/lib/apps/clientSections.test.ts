@@ -1,8 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import type { XplanClientSection } from '$lib/apis/gateway';
-import { groupSections, defaultSection, sectionDot, sectionLabel } from './clientSections';
+import {
+	groupSections,
+	defaultSection,
+	sectionDot,
+	sectionLabel,
+	unmappedPanels
+} from './clientSections';
 
-const sec = (section: string, status: XplanClientSection['status'], rows = 0, via = '1'): XplanClientSection => ({
+const sec = (
+	section: string,
+	status: XplanClientSection['status'],
+	rows = 0,
+	via = '1'
+): XplanClientSection => ({
 	section,
 	pageId: section,
 	fetchedViaId: via,
@@ -20,19 +31,34 @@ describe('groupSections', () => {
 		const groups = groupSections([]);
 		expect(groups.map((g) => g.key)).toEqual(['client', 'financial', 'insurance', 'tasks']);
 		expect(groups[0].entries.map((e) => e.section)).toEqual([
-			'key_details', 'habits', 'contact', 'employment', 'dependants',
-			'identity', 'domicile', 'category', 'notes', 'client_report'
+			'key_details',
+			'habits',
+			'contact',
+			'employment',
+			'dependants',
+			'identity',
+			'domicile',
+			'category',
+			'notes',
+			'client_report'
 		]);
 		expect(groups[3].entries).toEqual([
 			{ section: 'tasks', label: 'Tasks (open)', dot: 'empty', rowCount: 0, read: false }
 		]);
 	});
 
-	it('sums rows across a couple\'s two reads of one section', () => {
-		const groups = groupSections([sec('balancesheet', 'ok', 2, '1'), sec('balancesheet', 'ok', 3, '9')]);
+	it("sums rows across a couple's two reads of one section", () => {
+		const groups = groupSections([
+			sec('balancesheet', 'ok', 2, '1'),
+			sec('balancesheet', 'ok', 3, '9')
+		]);
 		const entry = groups[1].entries.find((e) => e.section === 'balancesheet');
 		expect(entry).toEqual({
-			section: 'balancesheet', label: 'Assets & Liabilities', dot: 'current', rowCount: 5, read: true
+			section: 'balancesheet',
+			label: 'Assets & Liabilities',
+			dot: 'current',
+			rowCount: 5,
+			read: true
 		});
 	});
 
@@ -70,5 +96,76 @@ describe('defaultSection', () => {
 	it('then the first section at all, and null when there are none', () => {
 		expect(defaultSection([sec('super', 'empty'), sec('contact', 'empty')])).toBe('contact');
 		expect(defaultSection([])).toBeNull();
+	});
+});
+
+describe('unmappedPanels', () => {
+	const panel = (
+		heading: string,
+		rows: Record<string, string>[],
+		headers = ['Description', 'Value']
+	) => ({
+		heading,
+		headers,
+		rows
+	});
+
+	it('returns the captured panels in stored order, keeping only those with rows', () => {
+		const s = {
+			...sec('balancesheet', 'ok'),
+			unmapped: {
+				'Plans and Benefits': panel('Plans and Benefits', [{ Description: 'Super', Value: '$1' }]),
+				Address: panel('Address', []),
+				'Balance Sheet': panel('Balance Sheet', [{ Description: 'Liquid Assets', Value: '$0.00' }])
+			}
+		};
+		expect(unmappedPanels(s).map((p) => p.heading)).toEqual([
+			'Plans and Benefits',
+			'Balance Sheet'
+		]);
+		expect(unmappedPanels(s)[0].headers).toEqual(['Description', 'Value']);
+	});
+
+	it('drops panels whose heading is a script blob, and anything not panel-shaped', () => {
+		const s = {
+			...sec('insurance_life', 'ok'),
+			unmapped: {
+				'//<![CDATA[ jQuery(function(){})': panel('//<![CDATA[ jQuery(function(){})', [
+					{ Description: 'x', Value: 'y' }
+				]),
+				Policies: panel('Policies', [{ Description: 'Life', Value: '$500k' }]),
+				note: 'not a panel',
+				half: { heading: 'half', rows: 'nope' }
+			}
+		};
+		expect(unmappedPanels(s).map((p) => p.heading)).toEqual(['Policies']);
+	});
+
+	it('keys a blank header the way the scraper does (col<i>), so its values still show', () => {
+		const s = {
+			...sec('balancesheet', 'ok'),
+			unmapped: {
+				a: panel('a', [{ 'Valuation Date': 'Total Net Assets', col1: '$10' }], ['Valuation Date', ''])
+			}
+		};
+		expect(unmappedPanels(s)[0].headers).toEqual(['Valuation Date', 'col1']);
+	});
+
+	it("falls back to the first row's keys when a panel has no headers", () => {
+		const s = {
+			...sec('key_details', 'ok'),
+			unmapped: { k: panel('k', [{ 'Client ID': '899317' }], []) }
+		};
+		expect(unmappedPanels(s)[0].headers).toEqual(['Client ID']);
+	});
+
+	it('is empty for an empty or missing unmapped', () => {
+		expect(unmappedPanels(sec('notes', 'ok'))).toEqual([]);
+		expect(
+			unmappedPanels({
+				...sec('notes', 'ok'),
+				unmapped: undefined as unknown as Record<string, unknown>
+			})
+		).toEqual([]);
 	});
 });
