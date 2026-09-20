@@ -184,21 +184,32 @@
 			<p class="text-sm text-gray-500 mt-1">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
 			<div class="mt-3"><SourceChips sources={agenda?.sources ?? {}} {connectors} {busy} on:connect={(e) => connect(e.detail)} on:disconnect={(e) => disconnect(e.detail)} /></div>
 		</div>
-		<div class="shrink-0 flex items-center gap-2">
+		<!-- Two reads, two costs. Refresh asks Outlook/Google again (the page
+		     otherwise reuses a read for 5 min); Re-read drives the XPLAN browser
+		     and asks the agent for its view. Each button says what it touches
+		     and when it last did — the old "Rebuild" link ran the same job as
+		     Re-read under a different name. -->
+		<div class="shrink-0 flex items-stretch gap-2">
 			{#if briefingJob}
-				<button on:click={() => stopJob(token(), briefingJob.id)} class="text-xs font-medium text-red-600 px-2 py-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20">Stop</button>
+				<button on:click={() => stopJob(token(), briefingJob.id)} class="text-xs font-medium text-red-600 px-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20">Stop</button>
 			{/if}
-			<button on:click={reread} disabled={!!briefingJob || xplanLocked}
-				title={xplanLocked ? 'XPLAN access is locked' : 'Re-reads the task list and diary from your signed-in XPLAN (scripted, ~10 s)'}
-				class="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50">
-				{briefingJob ? (briefingJob.status === 'queued' ? 'Queued…' : 'Re-reading…') : 'Re-read XPLAN tasks & diary'}
-			</button>
 			<button on:click={() => load(true)} disabled={loading}
-				class="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50">Refresh</button>
+				title="Asks Outlook and Google again now. Without this, the page reuses a read for 5 minutes. XPLAN is not re-read here."
+				class="text-left px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50">
+				<span class="block text-xs font-medium">{loading ? 'Refreshing…' : 'Refresh'}</span>
+				<span class="block text-[11px] text-gray-500">Outlook &amp; Google · instant{#if agenda} · read {compiledLabel(agenda.compiledAt)}{/if}</span>
+			</button>
+			<button on:click={reread} disabled={!!briefingJob || xplanLocked}
+				title={xplanLocked ? 'XPLAN access is locked' : "Reads the task list and diary from your signed-in XPLAN (scripted, ~10 s), then asks the agent for its view of the day."}
+				class="text-left px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50">
+				<span class="block text-xs font-medium">{briefingJob ? (briefingJob.status === 'queued' ? 'Queued…' : 'Re-reading XPLAN…') : 'Re-read XPLAN'}</span>
+				<span class="block text-[11px] {xplanLocked ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'}">
+					{#if xplanLocked}locked — no reads until unlocked{:else}tasks, diary &amp; agent's view · ~10 s · {agenda?.sources.xplan?.readAt ? `read ${compiledLabel(agenda.sources.xplan.readAt)}` : 'not read yet'}{/if}
+				</span>
+			</button>
 		</div>
 	</div>
 
-	{#if briefingJob?.progress}<p class="text-xs text-gray-500 -mt-3 mb-4">{briefingJob.progress}</p>{/if}
 	{#if jobNote}<p class="text-xs text-amber-700 dark:text-amber-300 -mt-3 mb-4">{jobNote}</p>{/if}
 	{#if err}<div class="mb-4 text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-xl px-4 py-3">{err}</div>{/if}
 	{#each sourceErrors as [src, s]}
@@ -220,13 +231,11 @@
 			<section>
 				<div class="flex items-center justify-between mb-3">
 					<h2 class="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">⚠ Needs attention</h2>
-					<button on:click={reread} disabled={!!briefingJob || xplanLocked}
-						title="Re-reads XPLAN and asks the agent for its view (the same job as Re-read)"
-						class="text-xs text-gray-500 underline disabled:opacity-50">{briefingJob ? 'Rebuilding…' : 'Rebuild'}</button>
+					{#if briefingJob}<span class="text-xs text-gray-400">{briefingJob.progress || 'the agent is re-reading…'}</span>{/if}
 				</div>
 				{#if briefing?.narrative}
 					<div class="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 text-sm whitespace-pre-line">{briefing.narrative}</div>
-					<p class="text-xs text-gray-400 mt-1">the agent's view, from your calendars and XPLAN · compiled {compiledLabel(briefing.compiledAt)}</p>
+					<p class="text-xs text-gray-400 mt-1">the agent's view, from your calendars and XPLAN · compiled {compiledLabel(briefing.compiledAt)} · updates when you re-read XPLAN</p>
 				{:else if attention.length}
 					<ul class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
 						{#each attention as t (t.id)}
@@ -236,9 +245,10 @@
 							</li>
 						{/each}
 					</ul>
-					<p class="text-xs text-gray-400 mt-1">rules only — rebuild for the agent's view</p>
+					<p class="text-xs text-gray-400 mt-1">rules only (overdue and due today) — <button on:click={reread} disabled={!!briefingJob || xplanLocked} class="underline disabled:opacity-50 disabled:no-underline">re-read XPLAN</button> for the agent's view</p>
 				{:else}
 					<p class="text-sm text-gray-500">Nothing overdue or due today.</p>
+					<p class="text-xs text-gray-400 mt-1">rules only — <button on:click={reread} disabled={!!briefingJob || xplanLocked} class="underline disabled:opacity-50 disabled:no-underline">re-read XPLAN</button> for the agent's view</p>
 				{/if}
 			</section>
 
