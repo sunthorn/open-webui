@@ -51,15 +51,21 @@
 		if (root && !root.contains(e.target as Node)) dispatch('close');
 	};
 
+	let armOutsideClick: ReturnType<typeof setTimeout>;
 	onMount(() => {
 		input?.focus();
-		// Attached in onMount, which Svelte runs on the next microtask after
-		// `picking = true` — after the click that set it has finished
-		// dispatching — so the click that opened the picker is never seen by
-		// this listener and can't immediately close it.
-		window.addEventListener('click', handleClickOutside);
+		// NOT attached synchronously here. onMount runs in Svelte's microtask
+		// flush, and the browser runs microtasks BETWEEN listeners while a
+		// native click is still bubbling — so a listener added now would
+		// receive the very click that opened the picker (button → … → window),
+		// see a target outside `root`, and close it in the same tick. A
+		// macrotask runs only after that dispatch has fully finished.
+		armOutsideClick = setTimeout(() => window.addEventListener('click', handleClickOutside), 0);
 	});
-	onDestroy(() => window.removeEventListener('click', handleClickOutside));
+	onDestroy(() => {
+		clearTimeout(armOutsideClick);
+		window.removeEventListener('click', handleClickOutside);
+	});
 
 	// Debounced, and sequence-guarded: a slow response for "ab" must not
 	// overwrite a fast one for "abbey".
