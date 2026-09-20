@@ -1,10 +1,10 @@
 <script lang="ts">
 	// One chip per source: connection state + the connect/disconnect action.
-	// XPLAN's chip is informational — its connection is the debug Chrome, and
-	// its state comes from the aggregator ('ok' | 'locked' | 'disconnected').
+	// The states live in sourceChip() (apps/agenda.ts); this file only draws
+	// them. `$: chips` names every input, so it re-runs when they arrive.
 	import { createEventDispatcher } from 'svelte';
 	import type { AgendaSource, AgendaSourceStatus, ConnectorsResponse, ConnectorProvider } from '$lib/apis/gateway/agenda';
-	import { SOURCE_META } from '$lib/apps/agenda';
+	import { sourceChip, type SourceChip } from '$lib/apps/agenda';
 
 	export let sources: Partial<Record<AgendaSource, AgendaSourceStatus>> = {};
 	export let connectors: ConnectorsResponse | null = null;
@@ -12,46 +12,49 @@
 
 	const dispatch = createEventDispatcher<{ connect: ConnectorProvider; disconnect: ConnectorProvider }>();
 
-	type Chip = { source: AgendaSource; label: string; color: string; state: 'ok' | 'warn' | 'off'; text: string; action?: 'connect' | 'disconnect' };
-
-	const chip = (s: AgendaSource): Chip => {
-		const meta = SOURCE_META[s];
-		const st = sources[s];
-		if (s === 'xplan') {
-			if (st?.status === 'locked') return { source: s, ...meta, state: 'warn', text: 'locked' };
-			if (st?.status === 'ok') return { source: s, ...meta, state: 'ok', text: '✓' };
-			return { source: s, ...meta, state: 'off', text: 'not read yet' };
-		}
-		const c = connectors?.[s as ConnectorProvider];
-		if (!c || c.status === 'disconnected') return { source: s, ...meta, state: 'off', text: 'connect', action: 'connect' };
-		if (c.status !== 'ok' || st?.status === 'error') return { source: s, ...meta, state: 'warn', text: 'reconnect', action: 'connect' };
-		return { source: s, ...meta, state: 'ok', text: c.email ?? '✓', action: 'disconnect' };
+	const time = (iso: string) => {
+		const d = new Date(iso);
+		return isNaN(d.getTime()) ? '' : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 	};
 
-	$: chips = (['xplan', 'm365', 'google'] as AgendaSource[]).map(chip);
+	$: chips = (['xplan', 'm365', 'google'] as AgendaSource[]).map((s) => sourceChip(s, sources, connectors, time));
 
-	const act = (c: Chip) => {
+	const act = (c: SourceChip) => {
 		if (!c.action) return;
 		dispatch(c.action, c.source as ConnectorProvider);
 	};
+	const hint = (c: SourceChip) =>
+		c.action === 'disconnect' ? `${c.label} connected as ${c.text} — click to disconnect`
+		: c.action === 'connect' ? (c.state === 'warn' ? `${c.label} needs to be connected again` : `Connect ${c.label} to read its calendar and tasks here`)
+		: c.source === 'xplan' && c.state === 'off' ? 'Read with the Re-read XPLAN button'
+		: c.label;
 </script>
 
 <div class="flex flex-wrap items-center gap-2">
-	{#each chips as c}
+	{#each chips as c (c.source)}
 		<button
 			type="button"
 			disabled={!c.action || busy === c.source}
 			on:click={() => act(c)}
-			title={c.action === 'disconnect' ? `Disconnect ${c.label}` : c.action === 'connect' ? `Connect ${c.label}` : c.label}
-			class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition
-				{c.state === 'ok' ? 'border-gray-200 dark:border-gray-700' : ''}
+			title={hint(c)}
+			class="group inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition
+				{c.state === 'ok' ? 'border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-850' : ''}
 				{c.state === 'warn' ? 'border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-900/20 dark:text-amber-300' : ''}
 				{c.state === 'off' ? 'border-dashed border-gray-300 text-gray-500 dark:border-gray-600' : ''}
-				{c.action ? 'hover:bg-gray-100 dark:hover:bg-gray-850' : 'cursor-default'}"
+				{c.action ? 'hover:bg-gray-100 dark:hover:bg-gray-800' : 'cursor-default'}"
 		>
-			<span class="w-2 h-2 rounded-full" style="background:{c.color}"></span>
+			<span class="w-2 h-2 rounded-full {c.state === 'off' ? 'opacity-40' : ''}" style="background:{c.color}"></span>
 			<span class="font-medium">{c.label}</span>
-			<span class="text-gray-500">{busy === c.source ? '…' : c.text}</span>
+			{#if busy === c.source}
+				<span class="text-gray-500">…</span>
+			{:else if c.state === 'ok'}
+				<span class="text-gray-500 group-hover:hidden">✓ {c.text}</span>
+				{#if c.action === 'disconnect'}<span class="hidden group-hover:inline text-red-600 dark:text-red-400">disconnect</span>{/if}
+			{:else if c.action === 'connect'}
+				<span class="{c.state === 'warn' ? '' : 'text-gray-600 dark:text-gray-300'} underline decoration-dotted underline-offset-2">{c.state === 'warn' ? '↻ reconnect' : '+ connect'}</span>
+			{:else}
+				<span class="text-gray-500">{c.text}</span>
+			{/if}
 		</button>
 	{/each}
 </div>

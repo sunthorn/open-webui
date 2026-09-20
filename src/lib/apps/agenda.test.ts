@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	groupTasks, timelineRange, placeEvent, eventsOn, allDayOn, toCalendarEvents,
-	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel
+	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel, sourceChip
 } from './agenda';
 import type { AgendaEvent, AgendaTask, AgendaResponse } from '$lib/apis/gateway/agenda';
 
@@ -245,5 +245,30 @@ describe('clientLabel', () => {
 		expect(clientLabel('pin')).toBe('pinned by you');
 		expect(clientLabel('rule')).toBe('matched by rule');
 		expect(clientLabel('agent')).toBe('suggested by the agent');
+	});
+});
+
+describe('sourceChip', () => {
+	const fmt = () => '14:30';
+	it('a connected provider shows its account and offers disconnect', () => {
+		const c = sourceChip('google', {}, { m365: { status: 'disconnected' }, google: { status: 'ok', email: 'a@b.c' } }, fmt);
+		expect(c).toMatchObject({ state: 'ok', text: 'a@b.c', action: 'disconnect' });
+	});
+	it('no connector row, or a disconnected one, offers connect', () => {
+		expect(sourceChip('m365', {}, null, fmt)).toMatchObject({ state: 'off', text: 'connect', action: 'connect' });
+		expect(sourceChip('m365', {}, { m365: { status: 'disconnected' }, google: { status: 'disconnected' } }, fmt).action).toBe('connect');
+	});
+	it('a provider needing re-auth, or one the aggregator could not read, asks to reconnect', () => {
+		const rows = { m365: { status: 'reauth' as const }, google: { status: 'ok' as const, email: 'a@b.c' } };
+		expect(sourceChip('m365', {}, rows, fmt)).toMatchObject({ state: 'warn', text: 'reconnect', action: 'connect' });
+		expect(sourceChip('google', { google: { status: 'error', message: 'x' } }, rows, fmt)).toMatchObject({ state: 'warn', text: 'reconnect' });
+	});
+	it('XPLAN is read, locked or not read yet — never connect', () => {
+		expect(sourceChip('xplan', { xplan: { status: 'ok', readAt: '2026-09-20T04:30:00Z' } }, null, fmt)).toMatchObject({ state: 'ok', text: 'read 14:30' });
+		expect(sourceChip('xplan', { xplan: { status: 'ok' } }, null, fmt).text).toBe('read');
+		expect(sourceChip('xplan', { xplan: { status: 'locked' } }, null, fmt)).toMatchObject({ state: 'warn', text: 'locked' });
+		const off = sourceChip('xplan', {}, null, fmt);
+		expect(off).toMatchObject({ state: 'off', text: 'not read yet' });
+		expect(off.action).toBeUndefined();
 	});
 });

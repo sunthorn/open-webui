@@ -1,6 +1,8 @@
 // Pure logic behind the Briefing page. No Svelte, no fetch — so vitest can
 // hold it to account. Rendering lives in src/lib/components/agenda/*.
-import type { AgendaEvent, AgendaResponse, AgendaSource, AgendaTask, ClientVia } from '$lib/apis/gateway/agenda';
+import type {
+	AgendaEvent, AgendaResponse, AgendaSource, AgendaSourceStatus, AgendaTask, ClientVia, ConnectorProvider, ConnectorsResponse
+} from '$lib/apis/gateway/agenda';
 import { isoDate } from '$lib/apis/gateway/agenda';
 import type { CalendarEventModel, CalendarModel } from '$lib/apis/calendar';
 
@@ -238,3 +240,38 @@ export const moveWindow = (startLocal: string, endLocal: string): { startAt: str
 
 export const clientLabel = (via: ClientVia): string =>
 	via === 'pin' ? 'pinned by you' : via === 'agent' ? 'suggested by the agent' : 'matched by rule';
+
+// --- Source chips -----------------------------------------------------------
+// One chip per source: its connection state and the action it offers. A pure
+// function so the states are testable and so the component's `$:` sees every
+// input it depends on — a chip computed inside a closure never re-rendered
+// when the connectors arrived, and every provider read "connect" forever.
+
+export interface SourceChip {
+	source: AgendaSource;
+	label: string;
+	color: string;
+	state: 'ok' | 'warn' | 'off';
+	text: string;
+	action?: 'connect' | 'disconnect';
+}
+
+export const sourceChip = (
+	s: AgendaSource,
+	sources: Partial<Record<AgendaSource, AgendaSourceStatus>>,
+	connectors: ConnectorsResponse | null,
+	time: (iso: string) => string
+): SourceChip => {
+	const { label, color } = SOURCE_META[s];
+	const st = sources[s];
+	if (s === 'xplan') {
+		// XPLAN's connection is the debug Chrome; the chip is informational.
+		if (st?.status === 'locked') return { source: s, label, color, state: 'warn', text: 'locked' };
+		if (st?.status === 'ok') return { source: s, label, color, state: 'ok', text: st.readAt ? `read ${time(st.readAt)}` : 'read' };
+		return { source: s, label, color, state: 'off', text: 'not read yet' };
+	}
+	const c = connectors?.[s as ConnectorProvider];
+	if (!c || c.status === 'disconnected') return { source: s, label, color, state: 'off', text: 'connect', action: 'connect' };
+	if (c.status !== 'ok' || st?.status === 'error') return { source: s, label, color, state: 'warn', text: 'reconnect', action: 'connect' };
+	return { source: s, label, color, state: 'ok', text: c.email ?? 'connected', action: 'disconnect' };
+};
