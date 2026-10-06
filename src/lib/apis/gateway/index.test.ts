@@ -18,6 +18,15 @@ describe('downloadXplanHelper', () => {
 	});
 });
 
+describe('downloadXplanHelper nested errors', () => {
+	it('digs the message out of a nested detail object', async () => {
+		const fetchFn = vi.fn().mockResolvedValue({
+			ok: false, status: 502, json: async () => ({ detail: { error: { message: 'x' } } })
+		});
+		await expect(downloadXplanHelper('tok', 'mac', fetchFn)).rejects.toThrow('x');
+	});
+});
+
 describe('disconnectXplanHelper', () => {
 	it('DELETEs and reports whether a token existed', async () => {
 		const fetchFn = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ deleted: true }) });

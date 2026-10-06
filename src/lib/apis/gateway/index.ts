@@ -125,16 +125,6 @@ export const getXplanStatus = async (token: string): Promise<XplanStatus> => {
 	return (await res.json()) as XplanStatus;
 };
 
-const detailOf = async (res: Response): Promise<string> => {
-	try {
-		const body = await res.json();
-		if (typeof body?.detail === 'string') return body.detail;
-	} catch {
-		/* not JSON */
-	}
-	return `Gateway error (${res.status})`;
-};
-
 /** The planner's own helper, as a zip. Minting it revokes their previous one. */
 export const downloadXplanHelper = async (
 	token: string,
@@ -144,7 +134,7 @@ export const downloadXplanHelper = async (
 	const res = await fetchFn(`${gatewayUrl()}/gw/xplan/helper?os=${os}`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw new Error(await detailOf(res));
+	if (!res.ok) throw await gatewayError(res);
 	return await res.blob();
 };
 
@@ -156,7 +146,7 @@ export const disconnectXplanHelper = async (
 		method: 'DELETE',
 		headers: { Authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw new Error(await detailOf(res));
+	if (!res.ok) throw await gatewayError(res);
 	return !!(await res.json()).deleted;
 };
 

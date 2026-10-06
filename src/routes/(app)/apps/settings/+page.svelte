@@ -56,6 +56,7 @@
 	let downloading = false;
 	let downloadErr = '';
 	const download = async (os: 'mac' | 'win') => {
+		if (downloading) return;
 		downloading = true;
 		downloadErr = '';
 		try {
@@ -252,7 +253,7 @@
 									class="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 text-xs font-medium transition">
 									{downloading ? 'Preparing…' : `Download for ${cmd.label}`}
 								</button>
-								<button type="button" on:click={() => download(other.os)} class="ml-2 text-xs underline underline-offset-2">
+								<button type="button" on:click={() => download(other.os)} disabled={downloading} class="ml-2 text-xs underline underline-offset-2">
 									{other.label} instead
 								</button>
 							</div>
