@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { needsHelper, installCommands } from './helper';
+import { needsHelper, installCommands, helperPanel } from './helper';
 
 describe('needsHelper', () => {
 	it('is true only when the browser is down AND the helper is not installed', () => {
@@ -21,5 +21,18 @@ describe('installCommands', () => {
 		const cmds = Object.fromEntries(installCommands('').map((c) => [c.os, c.cmd]));
 		expect(cmds.mac).toBe('python3 scripts/xplan-chrome-agent.py --install');
 		expect(cmds.win).toBe('py scripts\\xplan-chrome-agent.py --install');
+	});
+});
+
+describe('helperPanel', () => {
+	it('offers the download on a hosted stack and the command on a local one', () => {
+		expect(helperPanel({ browserUp: false, helper: 'not-installed', helperDownload: true })).toBe('download');
+		expect(helperPanel({ browserUp: false, helper: 'not-installed', helperDownload: false })).toBe('command');
+		expect(helperPanel({ browserUp: false, helper: 'not-installed' })).toBe('command');
+	});
+	it('shows nothing when the browser is up or the helper runs', () => {
+		expect(helperPanel({ browserUp: true, helper: 'not-installed', helperDownload: true })).toBe(null);
+		expect(helperPanel({ browserUp: false, helper: 'running', helperDownload: true })).toBe(null);
+		expect(helperPanel({ browserUp: false })).toBe(null);
 	});
 });

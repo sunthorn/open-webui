@@ -13,3 +13,10 @@ const COMMANDS = {
 /** Both commands, the visitor's OS first. The UA is a hint, never a gate. */
 export const installCommands = (userAgent: string) =>
 	/Windows/i.test(userAgent) ? [COMMANDS.win, COMMANDS.mac] : [COMMANDS.mac, COMMANDS.win];
+
+/** Which helper panel the XPLAN page shows: a download (hosted), the
+ *  developer command (local), or none. */
+export const helperPanel = (
+	s: Pick<XplanStatus, 'browserUp' | 'helper' | 'helperDownload'>
+): 'download' | 'command' | null =>
+	!needsHelper(s) ? null : s.helperDownload ? 'download' : 'command';

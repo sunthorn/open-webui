@@ -16,11 +16,12 @@
 		getXplanStatus,
 		getXplanAccess,
 		relaunchDebugBrowser,
+		downloadXplanHelper,
 		openInXplan,
 		accessMeta,
 		type XplanAccessLevel
 	} from '$lib/apis/gateway';
-	import { needsHelper, installCommands } from '$lib/apis/gateway/helper';
+	import { helperPanel, installCommands } from '$lib/apis/gateway/helper';
 	import { copyToClipboard } from '$lib/utils';
 	import XplanAccessControl from '$lib/components/xplan/XplanAccessControl.svelte';
 
@@ -30,6 +31,7 @@
 	let browserUp = false;
 	let loggedIn: boolean | null = null;
 	let helper: 'running' | 'not-installed' | undefined;
+	let helperDownload = false;
 	let probed = false;
 	// The gateway itself is unreachable (network/CORS/auth), as opposed to
 	// reachable-but-reporting-a-problem. Tracked separately so the page can say
@@ -44,12 +46,31 @@
 
 	$: step1 = !probed ? 'unknown' : browserUp ? 'ok' : 'todo';
 	$: step2 = loggedIn === true ? 'ok' : loggedIn === false ? 'fail' : 'unknown';
-	$: showHelper = probed && needsHelper({ browserUp, helper });
+	$: panel = probed ? helperPanel({ browserUp, helper, helperDownload }) : null;
+	$: showHelper = panel !== null;
 	// Detected OS first; the visitor can flip to the other one if we guessed wrong.
 	const commands = installCommands(typeof navigator === 'undefined' ? '' : navigator.userAgent);
 	let which = 0;
 	$: cmd = commands[which];
 	$: other = commands[1 - which];
+	let downloading = false;
+	let downloadErr = '';
+	const download = async (os: 'mac' | 'win') => {
+		downloading = true;
+		downloadErr = '';
+		try {
+			const blob = await downloadXplanHelper(token(), os);
+			const a = document.createElement('a');
+			a.href = URL.createObjectURL(blob);
+			a.download = `axi-xplan-helper-${os}.zip`;
+			a.click();
+			setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+		} catch (e) {
+			downloadErr = e instanceof Error ? e.message : String(e);
+		} finally {
+			downloading = false;
+		}
+	};
 	let copied = false;
 	const copyCmd = async () => {
 		copied = await copyToClipboard(cmd.cmd);
@@ -65,6 +86,7 @@
 			browserUp = !!s.browserUp;
 			loggedIn = s.loggedIn;
 			helper = s.helper;
+			helperDownload = !!s.helperDownload;
 			level = lvl;
 			probed = true;
 			unreachable = false;
@@ -209,6 +231,10 @@
 					<p class="text-sm text-gray-500 mt-1">
 						{#if step1 === 'ok'}
 							Running. Your XPLAN session lives in this window, not in axi.
+						{:else if panel === 'download'}
+							Your XPLAN browser is on your computer. Install the axi helper once — it
+							connects this computer's Chrome to axi. Download it, open the zip, and
+							double-click install.
 						{:else if showHelper}
 							The XPLAN helper is not installed on this computer. It keeps this
 							window open while axi is running. Install it once: open a terminal in the
@@ -219,7 +245,21 @@
 							Checking…
 						{/if}
 					</p>
-					{#if showHelper}
+					{#if panel === 'download'}
+						<div class="mt-2.5 space-y-1.5">
+							<div>
+								<button type="button" on:click={() => download(cmd.os)} disabled={downloading}
+									class="px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 text-xs font-medium transition">
+									{downloading ? 'Preparing…' : `Download for ${cmd.label}`}
+								</button>
+								<button type="button" on:click={() => download(other.os)} class="ml-2 text-xs underline underline-offset-2">
+									{other.label} instead
+								</button>
+							</div>
+							{#if downloadErr}<p class="text-xs text-red-600 dark:text-red-400 mt-2">{downloadErr}</p>{/if}
+							<p class="text-xs text-gray-500 pt-1">Each download replaces your previous helper. Then reload this page.</p>
+						</div>
+					{:else if panel === 'command'}
 						<div class="mt-2.5 space-y-1.5">
 							<div class="flex items-center gap-2 text-xs">
 								<span class="text-gray-500">{cmd.label}</span>

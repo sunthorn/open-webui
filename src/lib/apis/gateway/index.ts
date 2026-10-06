@@ -113,6 +113,8 @@ export interface XplanStatus {
 	tabUrl?: string | null;
 	/** Whether the host caretaker answers /health. Absent on an older gateway. */
 	helper?: 'running' | 'not-installed';
+	/** The gateway offers a per-planner helper download (hosted stacks). */
+	helperDownload?: boolean;
 }
 
 export const getXplanStatus = async (token: string): Promise<XplanStatus> => {
@@ -121,6 +123,41 @@ export const getXplanStatus = async (token: string): Promise<XplanStatus> => {
 	});
 	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
 	return (await res.json()) as XplanStatus;
+};
+
+const detailOf = async (res: Response): Promise<string> => {
+	try {
+		const body = await res.json();
+		if (typeof body?.detail === 'string') return body.detail;
+	} catch {
+		/* not JSON */
+	}
+	return `Gateway error (${res.status})`;
+};
+
+/** The planner's own helper, as a zip. Minting it revokes their previous one. */
+export const downloadXplanHelper = async (
+	token: string,
+	os: 'mac' | 'win',
+	fetchFn: typeof fetch = fetch
+): Promise<Blob> => {
+	const res = await fetchFn(`${gatewayUrl()}/gw/xplan/helper?os=${os}`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw new Error(await detailOf(res));
+	return await res.blob();
+};
+
+export const disconnectXplanHelper = async (
+	token: string,
+	fetchFn: typeof fetch = fetch
+): Promise<boolean> => {
+	const res = await fetchFn(`${gatewayUrl()}/gw/xplan/helper`, {
+		method: 'DELETE',
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) throw new Error(await detailOf(res));
+	return !!(await res.json()).deleted;
 };
 
 // --- Overview snapshot (last XPLAN sync) ----------------------------------
