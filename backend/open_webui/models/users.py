@@ -666,6 +666,24 @@ class UsersTable:
             await session.refresh(user)
             return UserModel.model_validate(user)
 
+    async def set_must_change_password_by_id(
+        self, id: str, value: bool, db: AsyncSession | None = None
+    ) -> UserModel | None:
+        """Set or clear info.must_change_password, preserving other info keys."""
+        async with get_async_db_context(db) as session:
+            user = await session.get(User, id)
+            if not user:
+                return None
+            info = dict(user.info or {})
+            if value:
+                info['must_change_password'] = True
+            else:
+                info.pop('must_change_password', None)
+            user.info = info
+            await session.commit()
+            await session.refresh(user)
+            return UserModel.model_validate(user)
+
     # settings update helper
     async def update_user_settings_by_id(
         self, id: str, updated: dict, db: AsyncSession | None = None

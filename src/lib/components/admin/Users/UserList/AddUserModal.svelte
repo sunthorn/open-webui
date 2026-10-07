@@ -10,7 +10,8 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import { generateInitialsImage } from '$lib/utils';
 	import XMark from '$lib/components/icons/XMark.svelte';
-	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
+	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
+	import { generatePassword } from '$lib/utils/password';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -32,7 +33,8 @@
 		_user = {
 			name: '',
 			email: '',
-			password: '',
+			// Temporary password, shown in plain text; the user must change it on first login.
+			password: generatePassword(),
 			role: 'user'
 		};
 	}
@@ -231,15 +233,34 @@
 								<div class=" mb-1 text-xs text-gray-500">{$i18n.t('Password')}</div>
 
 								<div class="flex-1">
-									<SensitiveInput
-										class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
-										type="password"
-										bind:value={_user.password}
-										aria-label={$i18n.t('Password')}
-										placeholder={$i18n.t('Enter Your Password')}
-										autocomplete="off"
-										required
-									/>
+									<div class="flex items-center gap-2">
+										<input
+											class="w-full text-sm font-mono bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
+											type="text"
+											bind:value={_user.password}
+											aria-label={$i18n.t('Password')}
+											placeholder={$i18n.t('Enter Your Password')}
+											autocomplete="off"
+											spellcheck="false"
+											required
+										/>
+										<button
+											class="shrink-0 p-1 rounded-lg text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+											type="button"
+											aria-label={$i18n.t('Generate new password')}
+											title={$i18n.t('Generate new password')}
+											on:click={() => {
+												_user.password = generatePassword();
+											}}
+										>
+											<ArrowPath className="size-4" />
+										</button>
+									</div>
+								</div>
+								<div class="mt-1 text-xs text-gray-500">
+									{$i18n.t(
+										'The user will be asked to choose a new password when they first sign in.'
+									)}
 								</div>
 							</div>
 						{:else if tab === 'import'}

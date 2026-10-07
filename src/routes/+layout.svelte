@@ -65,6 +65,11 @@
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL, WEBUI_HOSTNAME } from '$lib/constants';
 	import { bestMatchingLanguage, displayFileHandler, getUserTimezone } from '$lib/utils';
 	import { setTextScale } from '$lib/utils/text-scale';
+	import {
+		CHANGE_PASSWORD_PATH,
+		changePasswordUrl,
+		installPasswordChangeInterceptor
+	} from '$lib/utils/passwordChange';
 
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
@@ -89,6 +94,29 @@
 	};
 
 	// handle frontend updates (https://svelte.dev/docs/kit/configuration#version)
+	// Forced password change: send the user to the change page and keep them there.
+	const requirePasswordChange = () => {
+		if ($page.url.pathname === CHANGE_PASSWORD_PATH) return;
+		if ($user && !$user.must_change_password) {
+			user.set({ ...$user, must_change_password: true });
+		}
+		goto(changePasswordUrl(`${$page.url.pathname}${$page.url.search}`));
+	};
+
+	beforeNavigate(({ to, cancel, willUnload }) => {
+		if (
+			$user?.must_change_password &&
+			!willUnload &&
+			to?.url &&
+			to.url.origin === window.location.origin &&
+			to.url.pathname !== CHANGE_PASSWORD_PATH &&
+			to.url.pathname !== '/auth'
+		) {
+			cancel();
+			goto(changePasswordUrl(`${to.url.pathname}${to.url.search}`));
+		}
+	});
+
 	beforeNavigate(async ({ willUnload, to }) => {
 		if (updated.current && !willUnload && to?.url) {
 			await unregisterServiceWorkers();
@@ -882,6 +910,7 @@
 	};
 
 	onMount(async () => {
+		installPasswordChangeInterceptor(requirePasswordChange);
 		window.addEventListener('message', windowMessageEventHandler);
 
 		let touchstartY = 0;
@@ -1065,6 +1094,10 @@
 
 					if (sessionUser) {
 						await user.set(sessionUser);
+
+						if (sessionUser.must_change_password && $page.url.pathname !== CHANGE_PASSWORD_PATH) {
+							await goto(changePasswordUrl(currentUrl));
+						}
 						try {
 							await config.set(await getBackendConfig());
 						} catch (error) {

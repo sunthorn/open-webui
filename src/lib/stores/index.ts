@@ -352,4 +352,5 @@ export type SessionUser = {
 	name: string;
 	role: string;
 	profile_image_url: string;
+	must_change_password?: boolean;
 };

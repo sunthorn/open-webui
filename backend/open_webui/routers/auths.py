@@ -70,6 +70,7 @@ from open_webui.utils.auth import (
     get_password_hash,
     get_verified_user,
     invalidate_token,
+    user_must_change_password,
     validate_password,
     verify_password,
 )
@@ -140,6 +141,7 @@ async def create_session_response(
         'role': user.role,
         'profile_image_url': f'/api/v1/users/{user.id}/profile/image',
         'permissions': user_permissions,
+        'must_change_password': user_must_change_password(user),
     }
 
 
@@ -151,6 +153,7 @@ async def create_session_response(
 class SessionUserResponse(Token, UserProfileImageResponse):
     expires_at: int | None = None
     permissions: dict | None = None
+    must_change_password: bool = False
 
 
 class SessionUserInfoResponse(SessionUserResponse, UserStatus):
@@ -219,6 +222,7 @@ async def get_session_user(
         'status_message': user.status_message,
         'status_expires_at': user.status_expires_at,
         'permissions': user_permissions,
+        'must_change_password': user_must_change_password(user),
     }
 
     return response_data
@@ -297,12 +301,17 @@ async def update_password(
         )
 
         if user:
+            if form_data.new_password == form_data.password:
+                raise HTTPException(400, detail='The new password must be different from the current password.')
             try:
                 validate_password(form_data.new_password)
             except Exception as e:
                 raise HTTPException(400, detail=str(e))
             hashed = get_password_hash(form_data.new_password)
-            return await Auths.update_user_password_by_id(user.id, hashed, db=db)
+            updated = await Auths.update_user_password_by_id(user.id, hashed, db=db)
+            if updated and user_must_change_password(session_user):
+                await Users.set_must_change_password_by_id(user.id, False, db=db)
+            return updated
         else:
             raise HTTPException(400, detail=ERROR_MESSAGES.INCORRECT_PASSWORD)
     else:
@@ -933,6 +942,9 @@ async def add_user(
         )
 
         if user:
+            # Admin-chosen passwords are temporary: force a change on first login.
+            user = await Users.set_must_change_password_by_id(user.id, True, db=db) or user
+
             await apply_default_group_assignment(
                 request.app.state.config.DEFAULT_GROUP_ID,
                 user.id,

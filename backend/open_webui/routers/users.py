@@ -594,6 +594,10 @@ async def update_user_by_id(
             hashed = get_password_hash(form_data.password)
             await Auths.update_user_password_by_id(user_id, hashed, db=db)
 
+            # An admin-set password is temporary: force the user to choose their own.
+            if user_id != session_user.id:
+                user = await Users.set_must_change_password_by_id(user_id, True, db=db) or user
+
         # Build update dict from only the provided fields
         update_data = {}
         if form_data.role is not None:

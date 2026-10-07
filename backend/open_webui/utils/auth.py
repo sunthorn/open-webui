@@ -288,6 +288,31 @@ def get_http_authorization_cred(auth_header: str | None):
         return None
 
 
+# Forced password change (admin-created / admin-reset accounts).
+# Stored as info.must_change_password; while set, the user may only reach the
+# endpoints needed to finish the change-password flow.
+PASSWORD_CHANGE_REQUIRED = 'PASSWORD_CHANGE_REQUIRED'
+PASSWORD_CHANGE_ALLOWED_PATHS = frozenset(
+    {
+        '/api/v1/auths',
+        '/api/v1/auths/',
+        '/api/v1/auths/update/password',
+        '/api/v1/auths/update/timezone',
+        '/api/v1/auths/signout',
+    }
+)
+
+
+def user_must_change_password(user) -> bool:
+    info = getattr(user, 'info', None)
+    return isinstance(info, dict) and bool(info.get('must_change_password'))
+
+
+def enforce_password_change(request: Request, user) -> None:
+    if user_must_change_password(user) and request.scope['path'] not in PASSWORD_CHANGE_ALLOWED_PATHS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED)
+
+
 async def get_current_user(
     request: Request,
     response: Response,
@@ -297,6 +322,17 @@ async def get_current_user(
     # Sessions are managed internally with short-lived context managers.
     # This ensures connections are released immediately after auth queries,
     # not held for the entire request duration (e.g., during 30+ second LLM calls).
+):
+    user = await _authenticate_request(request, response, auth_token)
+    # Outside _authenticate_request so a 403 here never clears the auth cookie.
+    enforce_password_change(request, user)
+    return user
+
+
+async def _authenticate_request(
+    request: Request,
+    response: Response,
+    auth_token: HTTPAuthorizationCredentials | None,
 ):
     token = None
 

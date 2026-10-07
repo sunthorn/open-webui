@@ -21,6 +21,7 @@
 	import { WEBUI_NAME, config, user, socket } from '$lib/stores';
 
 	import { generateInitialsImage, canvasPixelTest, getUserTimezone } from '$lib/utils';
+	import { changePasswordUrl } from '$lib/utils/passwordChange';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
@@ -63,8 +64,12 @@
 				redirectPath = $page.url.searchParams.get('redirect') || '/';
 			}
 
-			goto(redirectPath);
 			localStorage.removeItem('redirectPath');
+			if (sessionUser.must_change_password) {
+				goto(changePasswordUrl(redirectPath));
+				return;
+			}
+			goto(redirectPath);
 		}
 	};
 
@@ -168,7 +173,7 @@
 	onMount(async () => {
 		const redirectPath = $page.url.searchParams.get('redirect');
 		if ($user !== undefined) {
-			goto(redirectPath || '/');
+			goto($user?.must_change_password ? changePasswordUrl(redirectPath) : redirectPath || '/');
 		} else {
 			if (redirectPath) {
 				localStorage.setItem('redirectPath', redirectPath);
