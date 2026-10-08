@@ -1,6 +1,7 @@
 import logging
+import re
 import time
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from urllib.parse import quote
 
 import jwt
@@ -82,3 +83,19 @@ def get_custom_headers(custom_headers: dict, user=None, metadata: dict = None) -
         parsed_headers[key] = value
 
     return parsed_headers
+
+
+# Mirrors hermes' own acceptance pattern (shared-contracts/search-spec.md).
+_AXI_CLIENT_RE = re.compile(r'^[A-Za-z0-9:_-]{1,64}$')
+
+
+def axi_client_header(incoming: Mapping[str, str], api_config: dict) -> dict:
+    """axi: pass the active XPLAN client (X-Axi-Client from the shell's chat
+    request) through to the AGENT connection only: the one whose custom
+    headers name the chatting user (X-Axi-Agent-User). A third-party model
+    connection never sees it. Malformed values are dropped, not forwarded."""
+    custom = (api_config or {}).get('headers') or {}
+    if not isinstance(custom, dict) or 'X-Axi-Agent-User' not in custom:
+        return {}
+    value = (incoming.get('x-axi-client') or incoming.get('X-Axi-Client') or '').strip()
+    return {'X-Axi-Client': value} if _AXI_CLIENT_RE.match(value) else {}

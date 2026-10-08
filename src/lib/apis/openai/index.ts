@@ -1,3 +1,6 @@
+import { get } from 'svelte/store';
+import { linkableClientId } from '$lib/apps/activeClient';
+import { clientHeader } from '$lib/apps/clientHeader';
 import { OPENAI_API_BASE_URL, WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 
 export const getOpenAIConfig = async (token: string = '') => {
@@ -209,7 +212,8 @@ export const chatCompletion = async (
 		method: 'POST',
 		headers: {
 			Authorization: `Bearer ${token}`,
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			...clientHeader(get(linkableClientId))
 		},
 		body: JSON.stringify(body)
 	}).catch((err) => {
@@ -236,7 +240,8 @@ export const generateOpenAIChatCompletion = async (
 		method: 'POST',
 		headers: {
 			Authorization: `Bearer ${token}`,
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			...clientHeader(get(linkableClientId))
 		},
 		credentials: 'include',
 		body: JSON.stringify(body)
