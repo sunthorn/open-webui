@@ -21,7 +21,7 @@
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import { APPS } from '$lib/apps/menu';
-	import { shellUrlFor } from '$lib/apps/clientTarget';
+	import { frameSrcFor, shellUrlFor } from '$lib/apps/clientTarget';
 
 	let frame: HTMLIFrameElement;
 	let loading = true;
@@ -32,26 +32,25 @@
 	$: known = APPS.some((a) => a.id === appId);
 
 	/**
-	 * The active client, when the Sidebar put one on this axi URL.
-	 *
 	 * `$page.params.rest` is path only -- SvelteKit never folds the query
-	 * string into a rest param -- so it has to be read and re-attached here
-	 * by hand, or salem's iframe never sees it at all.
+	 * string into a rest param -- so the axi URL's query (the active client
+	 * AND any deep link such as ?meeting=, ?note=, ?tab=) is re-attached here
+	 * by hand, or the frame never sees it at all.
+	 *
+	 * /x/salem/meetings?meeting=m1&client=C -> /salem/meetings?embed=1&meeting=m1&client=C
 	 */
-	$: clientId = $page.url.searchParams.get('client');
-
-	/** /x/salem/meetings -> /salem/meetings?embed=1
-	 *  /x/salem/meetings?client=899317 -> /salem/meetings?embed=1&client=899317 */
-	$: src = known
-		? `/${appId}/${rest}${rest.includes('?') ? '&' : '?'}embed=1${clientId ? `&client=${encodeURIComponent(clientId)}` : ''}`
-		: '';
+	$: src = known ? frameSrcFor(appId, rest, $page.url.search) : '';
 
 	/**
-	 * Keep axi's address bar in step with the frame -- path AND client.
-	 * The client is not inside the frame's own URL (salem reads it once from
-	 * ?client= and then routes internally), so it is re-attached from the
-	 * axi URL that is current now; dropping it made a reload inside salem
-	 * lose the scope (spec 2026-10-08 §3.2).
+	 * Keep axi's address bar in step with the frame -- path, the frame's own
+	 * query (minus embed/client) AND client. The client is not reliably in the
+	 * frame's URL (salem reads it once from ?client= and then routes
+	 * internally), so it is re-attached from the axi URL; dropping it made a
+	 * reload inside salem lose the scope (spec 2026-10-08 §3.2).
+	 *
+	 * Compared against window.location, not $page.url: replaceState does not
+	 * update $page.url, so comparing with it would re-fire every poll. `src`
+	 * reads $page.url, which therefore stays put and never reloads the frame.
 	 *
 	 * Same origin, so the frame's location is readable. Polling rather than
 	 * listening: an SPA inside the frame changes its URL with pushState, which
@@ -62,8 +61,13 @@
 			const inner = frame?.contentWindow?.location;
 			if (!inner || !appId) return;
 			const innerPath = inner.pathname.replace(new RegExp(`^/${appId}/?`), '');
-			const want = shellUrlFor(appId, innerPath, $page.url.searchParams.get('client'));
-			if (want !== `${$page.url.pathname}${$page.url.search}`) {
+			const want = shellUrlFor(
+				appId,
+				innerPath,
+				$page.url.searchParams.get('client'),
+				inner.search
+			);
+			if (want !== `${window.location.pathname}${window.location.search}`) {
 				replaceState(want, {});
 			}
 		} catch {

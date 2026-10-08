@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { finnyClientTarget, withClient, rescopeUrl, scopeRowHref, shellUrlFor } from './clientTarget';
+import {
+	finnyClientTarget,
+	frameSrcFor,
+	withClient,
+	rescopeUrl,
+	scopeRowHref,
+	shellUrlFor
+} from './clientTarget';
 
 describe('finnyClientTarget', () => {
 	it('routes to the client profile when there is an XPLAN id', () => {
@@ -95,6 +102,52 @@ describe('shellUrlFor', () => {
 	});
 	it('encodes the id', () => {
 		expect(shellUrlFor('salem', 'kb', 'a b')).toBe('/x/salem/kb?client=a%20b');
+	});
+	it("keeps the frame's own query, minus embed and its client", () => {
+		expect(shellUrlFor('salem', 'meetings', '899317', '?embed=1&meeting=m1&client=old')).toBe(
+			'/x/salem/meetings?meeting=m1&client=899317'
+		);
+	});
+	it("keeps the frame's query when there is no client", () => {
+		expect(shellUrlFor('finny', 'clients/9', null, '?tab=documents')).toBe(
+			'/x/finny/clients/9?tab=documents'
+		);
+	});
+	it('is stable when fed its own output, so replaceState settles', () => {
+		const once = shellUrlFor('salem', 'notes', 'c 1', '?note=a%20b&embed=1');
+		const search = once.slice(once.indexOf('?'));
+		expect(shellUrlFor('salem', 'notes', 'c 1', search)).toBe(once);
+	});
+});
+
+describe('frameSrcFor', () => {
+	it('is the app path with embed=1', () => {
+		expect(frameSrcFor('salem', 'meetings', '')).toBe('/salem/meetings?embed=1');
+	});
+	it('carries the client', () => {
+		expect(frameSrcFor('salem', 'meetings', '?client=899317')).toBe(
+			'/salem/meetings?embed=1&client=899317'
+		);
+	});
+	it('forwards a salem meeting deep link intact', () => {
+		expect(frameSrcFor('salem', 'meetings', '?meeting=m-1&client=899317')).toBe(
+			'/salem/meetings?embed=1&meeting=m-1&client=899317'
+		);
+	});
+	it('forwards a salem note deep link intact', () => {
+		expect(frameSrcFor('salem', 'notes', '?note=n1&client=899317')).toBe(
+			'/salem/notes?embed=1&note=n1&client=899317'
+		);
+	});
+	it('forwards a finny tab deep link', () => {
+		expect(frameSrcFor('finny', 'clients/899317', '?tab=documents')).toBe(
+			'/finny/clients/899317?embed=1&tab=documents'
+		);
+	});
+	it('never doubles embed or client from the axi URL', () => {
+		expect(frameSrcFor('salem', 'kb', '?embed=0&client=a&client=b&q=x')).toBe(
+			'/salem/kb?embed=1&q=x&client=a'
+		);
 	});
 });
 

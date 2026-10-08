@@ -42,9 +42,41 @@ export const scopeRowHref = (
 ): string =>
 	appId === 'salem' || rowId === 'finny-documents' ? withClient(href, clientId) : href;
 
-/** The axi address for a framed page, with the client kept (spec §3.2). */
-export const shellUrlFor = (appId: string, innerPath: string, clientId: string | null): string =>
-	withClient(`/x/${appId}/${innerPath}`, clientId);
+/**
+ * `embed` and `client` belong to the shell: the frame always gets `embed=1`
+ * and the active client is the axi URL's, so neither is passed through.
+ * Everything else (`?meeting=`, `?note=`, `?tab=`) is the app's own deep link.
+ */
+const passThrough = (search: string): string => {
+	const params = new URLSearchParams(search);
+	params.delete('embed');
+	params.delete('client');
+	return params.toString();
+};
+
+const joinQuery = (path: string, query: string): string => (query ? `${path}?${query}` : path);
+
+/**
+ * The axi address for a framed page: the frame's own query kept, the client
+ * re-attached from the axi URL (spec §3.2). Feeding it its own output returns
+ * the same string, so the address-bar sync settles after one replaceState.
+ */
+export const shellUrlFor = (
+	appId: string,
+	innerPath: string,
+	clientId: string | null,
+	innerSearch = ''
+): string => withClient(joinQuery(`/x/${appId}/${innerPath}`, passThrough(innerSearch)), clientId);
+
+/**
+ * The frame `src` for an axi URL: /x/salem/meetings?meeting=m1&client=C ->
+ * /salem/meetings?embed=1&meeting=m1&client=C. Deep-link params ride along.
+ */
+export const frameSrcFor = (appId: string, rest: string, axiSearch: string): string => {
+	const extra = passThrough(axiSearch);
+	const path = `/${appId}/${rest}?embed=1${extra ? `&${extra}` : ''}`;
+	return withClient(path, new URLSearchParams(axiSearch).get('client'));
+};
 
 /**
  * Where to send the browser when the active client changes WHILE the planner
