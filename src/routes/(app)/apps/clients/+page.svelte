@@ -2,7 +2,7 @@
 	// Clients — the hub for choosing who the planner works on.
 	// Model: SYNC the XPLAN client book into axi (manual "Sync client book"),
 	// then search it LOCALLY (instant, free). Also quick-pick Recent, Needs-
-	// attention (from the briefing), and New leads. Selecting sets the global
+	// attention (from the briefing). Selecting sets the global
 	// active client. See docs/xplan-integration-plan.md.
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -19,14 +19,12 @@
 		recentClients,
 		setActiveClient
 	} from '$lib/apps/activeClient';
-	import { loadLeads, upsertLead, enquiryProgress, ENQUIRY_STEPS, type Lead } from '$lib/apps/leads';
 	import { type XplanClient } from '$lib/apis/xplan';
 	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
 	let query = '';
 	let attention: string[] = [];
-	let leads: Lead[] = [];
 	// Set when a "Needs attention" name can't be matched to an id in the
 	// synced book (see pickFromAttention below) — never left silently unset,
 	// because pickExisting() with a blank id would otherwise render exactly
@@ -45,8 +43,6 @@
 
 	const token = () => localStorage.getItem('token') ?? '';
 	const nowIso = () => new Date().toISOString();
-	const newId = () =>
-		'lead-' + (crypto?.randomUUID?.() ?? `${Date.now()}-${Math.round(Math.random() * 1e6)}`).slice(0, 12);
 
 	// Full timestamp: dd/mm/yy hh:mm (24h).
 	const fmt = (iso: string) => {
@@ -77,11 +73,6 @@
 			}
 		} catch (e) {
 			console.warn('briefing:', e);
-		}
-		try {
-			leads = await loadLeads(token());
-		} catch (e) {
-			console.warn('leads:', e);
 		}
 		await reloadBook();
 	});
@@ -171,7 +162,7 @@
 	};
 
 	const pickExisting = (name: string, id = '') => {
-		setActiveClient({ id: id || '', name, mode: 'existing', since: nowIso() });
+		setActiveClient({ id: id || '', name, since: nowIso() });
 		goto('/apps/clients/detail');
 	};
 
@@ -197,24 +188,6 @@
 			return;
 		}
 		attentionUnresolved = name;
-	};
-
-	const createNew = async () => {
-		const name = query.trim();
-		if (!name) return;
-		const lead: Lead = { id: newId(), name, createdAt: nowIso(), stage: 'enquiry', enquiry: {} };
-		try {
-			leads = await upsertLead(token(), lead);
-		} catch (e) {
-			console.warn('persist lead:', e);
-		}
-		setActiveClient({ id: lead.id, name, mode: 'new', since: nowIso() });
-		goto('/apps/enquiry');
-	};
-
-	const openLead = (lead: Lead) => {
-		setActiveClient({ id: lead.id, name: lead.name, mode: 'new', since: nowIso() });
-		goto('/apps/enquiry');
 	};
 
 	$: q = query.trim().toLowerCase();
@@ -356,7 +329,6 @@
 	$: bookFiltered = q ? bookMatches : bookMatches.slice(0, browseLimit);
 	$: recentFiltered = $recentClients.filter((c) => !q || c.name.toLowerCase().includes(q));
 	$: attentionFiltered = attention.filter((n) => !q || n.toLowerCase().includes(q));
-	$: openLeads = leads.filter((l) => l.stage === 'enquiry');
 </script>
 
 <!--
@@ -374,7 +346,7 @@
 	<div class="flex items-start justify-between gap-4 mb-6">
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">Clients</h1>
-			<p class="text-sm text-gray-500 mt-1">Search your synced XPLAN book, or create a new client.</p>
+			<p class="text-sm text-gray-500 mt-1">Search your synced XPLAN book.</p>
 		</div>
 		<div class="shrink-0 flex items-center gap-2">
 			<!-- Check the source: XPLAN's own client book. -->
@@ -441,7 +413,6 @@
 					<button on:click={() => pickExisting(c.name, c.id)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
 						<span class="size-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-semibold shrink-0">{c.name.slice(0, 1).toUpperCase()}</span>
 						<span class="flex-1 min-w-0 truncate {$activeClient && $activeClient.name === c.name ? 'font-semibold' : ''}">{c.name}</span>
-						{#if c.mode === 'new'}<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">new</span>{/if}
 					</button>
 				{/each}
 			</div>
@@ -468,26 +439,6 @@
 			</div>
 		</section>
 	{/if}
-
-	<!-- New leads -->
-	<section>
-		<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">New leads</h2>
-		{#if openLeads.filter((l) => !q || l.name.toLowerCase().includes(q)).length}
-			<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
-				{#each openLeads.filter((l) => !q || l.name.toLowerCase().includes(q)) as lead}
-					<button on:click={() => openLead(lead)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
-						<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-xs font-semibold shrink-0">{lead.name.slice(0, 1).toUpperCase()}</span>
-						<span class="flex-1 min-w-0 truncate">{lead.name}</span>
-						<span class="text-xs text-gray-400 tabular-nums">{enquiryProgress(lead)}/{ENQUIRY_STEPS.length} enquiry</span>
-					</button>
-				{/each}
-			</div>
-		{:else}
-			<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
-				<p class="text-sm text-gray-500">No new leads yet. Type a new client’s name in the search box below to create one.</p>
-			</div>
-		{/if}
-	</section>
 
 	<!-- Search + filters. Sits directly above the list it acts on: both the
 	     filters and the box narrow the same book, and putting them at the top
@@ -557,24 +508,11 @@
 			</svg>
 			<input
 				bind:value={query}
-				placeholder="Search by client name, or type a new client’s name…"
+				placeholder="Search by client name…"
 				class="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pl-11 pr-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
 			/>
 		</div>
 	</div>
-
-	<!-- Create-new affordance. Moved with the search box, not left at the top:
-	     it echoes what was typed, and stranding it away from the input made it
-	     read as an unrelated action. -->
-	{#if q}
-		<button
-			on:click={createNew}
-			class="w-full flex items-center gap-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-850 transition mb-6"
-		>
-			<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-lg leading-none shrink-0">+</span>
-			<span>Create new client “<span class="font-medium">{query.trim()}</span>” → start a New Enquiry</span>
-		</button>
-	{/if}
 
 	<!-- Your clients (synced book): browse at the bottom; filters when searching -->
 	{#if bookFiltered.length}

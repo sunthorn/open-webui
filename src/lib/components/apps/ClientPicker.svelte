@@ -102,7 +102,7 @@
 			dispatch('close');
 			return;
 		}
-		setActiveClient({ id: row.id, name: row.name, mode: 'existing', since: new Date().toISOString() });
+		setActiveClient({ id: row.id, name: row.name, since: new Date().toISOString() });
 		dispatch('close');
 	};
 

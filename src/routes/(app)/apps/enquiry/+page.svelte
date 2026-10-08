@@ -69,8 +69,7 @@
 			<h1 class="text-2xl font-semibold tracking-tight mt-1">{lead.name}</h1>
 			<p class="text-sm text-gray-500 mt-1">Initial contact &amp; triage — {completed}/{ENQUIRY_STEPS.length} done.</p>
 			</div>
-			{#if $activeClient?.mode === 'existing'}
-				<!-- Only existing clients have an XPLAN record to open. -->
+			{#if $activeClient}
 				<XplanLink
 					path={`/factfind/view/${$activeClient.id}?role=client`}
 					label="Fact Find"

@@ -94,14 +94,6 @@
 					>Working on</span
 				>
 				<span class="font-medium truncate">{$activeClient.name}</span>
-				<span
-					class="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full {$activeClient.mode ===
-					'new'
-						? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300'
-						: 'bg-gray-200 text-gray-600 dark:bg-gray-800 dark:text-gray-300'}"
-				>
-					{$activeClient.mode === 'new' ? 'new' : 'existing'}
-				</span>
 				<div class="shrink-0 flex items-center gap-1">
 					<button
 						on:click={() => (picking = true)}

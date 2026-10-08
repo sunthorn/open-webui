@@ -14,14 +14,12 @@
 	let stage: Stage = 'start';
 
 	let clientName = '';
-	let clientMode: 'new' | 'existing' = 'new';
 
 	// Adopt the active client set on the Clients hub — Data Entry never asks
 	// "who?" again; it works on whoever the planner selected.
 	onMount(() => {
 		if ($activeClient) {
 			clientName = $activeClient.name;
-			clientMode = $activeClient.mode;
 			sessionId = newSessionId();
 			stage = 'upload';
 		}
@@ -91,7 +89,7 @@
 				docs.push(await extractDocument(token(), f));
 			}
 			busyMsg = 'Asking the agent to map the data to XPLAN…';
-			proposal = await proposeMapping(token(), clientName.trim(), clientMode, docs);
+			proposal = await proposeMapping(token(), clientName.trim(), 'existing', docs);
 			if (!proposal.items.length) {
 				error = 'The agent found no mappable fields in these documents.';
 			} else {
@@ -170,7 +168,7 @@
 	<div class="mb-8">
 		<div class="flex items-start justify-between gap-4">
 			<h1 class="text-2xl font-semibold tracking-tight">Data Entry &amp; Research</h1>
-			{#if $activeClient?.mode === 'existing'}
+			{#if $activeClient}
 				<!-- Compare the proposal against the client's real XPLAN record. -->
 				<XplanLink
 					path={`/factfind/view/${$activeClient.id}?role=client`}

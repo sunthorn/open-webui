@@ -21,7 +21,8 @@
 	import { appById, type MenuRow } from '$lib/apps/menu';
 	import { activeApp, optionsOpen, showSidebar, mobile } from '$lib/stores';
 	import { ICON } from '$lib/apps/menu';
-	import { withClient } from '$lib/apps/clientTarget';
+	import { scopeRowHref } from '$lib/apps/clientTarget';
+	import { unassignedCount, badgeLabel, refreshUnassignedCount } from '$lib/apps/unassignedCount';
 	import { linkableClientId } from '$lib/apps/activeClient';
 
 	$: app = appById($activeApp);
@@ -32,14 +33,16 @@
 		href && ($page.url.pathname === href || $page.url.pathname.startsWith(href + '/'));
 
 	/**
-	 * salem's rows carry the active axi client on the URL -- it is the only
-	 * federated app that reads one (see clientTarget.ts). finny scopes by path
-	 * instead, and axi's own rows have no XPLAN client to carry, so both are
-	 * left untouched here. Matched by app id rather than by row, since that is
-	 * the only place "which app owns this row" is known at render time.
+	 * Which rows carry the active client is decided in clientTarget.ts
+	 * (salem's rows and finny's Documents row), so it is testable; this is
+	 * only the lookup. Matched by app id and row id since this is the only
+	 * place "which app owns this row" is known at render time.
 	 */
-	$: scopedHref = (href: string) =>
-		app?.id === 'salem' ? withClient(href, $linkableClientId) : href;
+	$: scopedHref = (href: string, rowId = '') => scopeRowHref(app?.id, rowId, href, $linkableClientId);
+
+	// The Unassigned badge: refreshed when salem's menu is on screen and on
+	// every navigation while it is -- assigning on the page changes the count.
+	$: if (app?.id === 'salem' && $page.url) void refreshUnassignedCount();
 
 	/** The Options row is "current" while you are on any page it reveals. */
 	$: optionsHasActive = !!app?.options?.some(
@@ -64,7 +67,7 @@
 			return; // let the anchor do it
 		}
 		e.preventDefault();
-		goto(scopedHref(row.href));
+		goto(scopedHref(row.href, row.id));
 		if ($mobile) showSidebar.set(false);
 	};
 </script>
@@ -148,7 +151,7 @@
 									</div>
 								{:else}
 									<a
-										href={sub.href ? scopedHref(sub.href) : '#'}
+										href={sub.href ? scopedHref(sub.href, sub.id) : '#'}
 										draggable="false"
 										aria-label={sub.label}
 										aria-current={isActive(sub.href) ? 'page' : undefined}
@@ -177,7 +180,7 @@
 					{/if}
 				{:else}
 					<a
-						href={row.href ? scopedHref(row.href) : '#'}
+						href={row.href ? scopedHref(row.href, row.id) : '#'}
 						draggable="false"
 						aria-label={row.label}
 						aria-current={isActive(row.href) ? 'page' : undefined}
@@ -199,6 +202,14 @@
 							<path stroke-linecap="round" stroke-linejoin="round" d={row.icon} />
 						</svg>
 						<span class="flex-1 min-w-0 truncate text-sm font-primary">{row.label}</span>
+						{#if row.id === 'salem-unassigned' && badgeLabel($unassignedCount)}
+							<span
+								class="shrink-0 text-[10px] font-semibold tabular-nums px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+								aria-label="{badgeLabel($unassignedCount)} unassigned"
+							>
+								{badgeLabel($unassignedCount)}
+							</span>
+						{/if}
 					</a>
 				{/if}
 			{/each}

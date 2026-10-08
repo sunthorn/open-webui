@@ -117,9 +117,9 @@
 	}
 
 	$: client = $activeClient;
-	// A 'new:'-prefixed id (or mode 'new') means no XPLAN entity id exists yet —
-	// there's nothing to read against.
-	$: hasXplanId = !!client && client.mode !== 'new' && !!client.id && !client.id.startsWith('new:');
+	// Every client is an XPLAN client; only a blank id (a name the briefing
+	// could not resolve) leaves nothing to read against.
+	$: hasXplanId = !!client && !!client.id;
 
 	$: groups = groupSections(sections);
 	$: selectedRows = selected ? sections.filter((s) => s.section === selected) : [];

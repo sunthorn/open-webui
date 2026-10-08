@@ -5,14 +5,28 @@ import { writable, derived } from 'svelte/store';
 import { browser } from '$app/environment';
 
 export interface ActiveClient {
-	id: string; // XPLAN client id if known; else a local id (e.g. 'new:<name>')
+	id: string; // the XPLAN client id — the only kind of client there is (client-identity-spec §1)
 	name: string;
-	mode: 'existing' | 'new';
 	since: string; // ISO — when they became the active client
 }
 
 const ACTIVE_KEY = 'xplan.activeClient';
 const RECENT_KEY = 'xplan.recentClients';
+
+/**
+ * Rows written by the previous release carried `mode: 'new'` and a LOCAL id
+ * (`new:<name>` from the hub, `lead-…` from its id minter). Those were never
+ * XPLAN clients; after the upgrade they must not become one. Anything that
+ * is not a {id, name, since} with a real id is dropped.
+ */
+export const sanitizeStored = (list: unknown[]): ActiveClient[] =>
+	list.flatMap((raw) => {
+		if (!raw || typeof raw !== 'object') return [];
+		const r = raw as Record<string, unknown>;
+		const id = typeof r.id === 'string' ? r.id.trim() : '';
+		if (!id || id.startsWith('new:') || id.startsWith('lead-')) return [];
+		return [{ id, name: String(r.name ?? ''), since: String(r.since ?? '') }];
+	});
 
 const readJSON = <T>(key: string, fallback: T): T => {
 	if (!browser) return fallback;
@@ -24,20 +38,17 @@ const readJSON = <T>(key: string, fallback: T): T => {
 	}
 };
 
-export const activeClient = writable<ActiveClient | null>(readJSON(ACTIVE_KEY, null));
-export const recentClients = writable<ActiveClient[]>(readJSON(RECENT_KEY, []));
+const readActive = (): ActiveClient | null => {
+	const raw = readJSON<unknown>(ACTIVE_KEY, null);
+	return raw ? (sanitizeStored([raw])[0] ?? null) : null;
+};
 
-/**
- * The active client's XPLAN id, or null when there is nothing another app's
- * foreign key can reference.
- *
- * A `mode: 'new'` lead carries a LOCAL id (`new:<name>`) minted by the Clients
- * page, not an XPLAN id. Handing that to finny or salem would write a dangling
- * reference into the identity contract, so every consumer reads this store
- * rather than `activeClient.id` directly.
- */
+export const activeClient = writable<ActiveClient | null>(readActive());
+export const recentClients = writable<ActiveClient[]>(sanitizeStored(readJSON<unknown[]>(RECENT_KEY, [])));
+
+/** The active client's XPLAN id, or null when nothing is selected. */
 export const linkableClientId = derived(activeClient, ($c) =>
-	$c && $c.mode === 'existing' && $c.id.trim() ? $c.id.trim() : null
+	$c && $c.id.trim() ? $c.id.trim() : null
 );
 
 if (browser) {

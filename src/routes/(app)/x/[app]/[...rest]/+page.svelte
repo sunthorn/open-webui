@@ -21,6 +21,7 @@
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import { APPS } from '$lib/apps/menu';
+	import { shellUrlFor } from '$lib/apps/clientTarget';
 
 	let frame: HTMLIFrameElement;
 	let loading = true;
@@ -46,7 +47,11 @@
 		: '';
 
 	/**
-	 * Keep axi's address bar in step with the frame.
+	 * Keep axi's address bar in step with the frame -- path AND client.
+	 * The client is not inside the frame's own URL (salem reads it once from
+	 * ?client= and then routes internally), so it is re-attached from the
+	 * axi URL that is current now; dropping it made a reload inside salem
+	 * lose the scope (spec 2026-10-08 §3.2).
 	 *
 	 * Same origin, so the frame's location is readable. Polling rather than
 	 * listening: an SPA inside the frame changes its URL with pushState, which
@@ -55,10 +60,10 @@
 	const syncUrl = () => {
 		try {
 			const inner = frame?.contentWindow?.location;
-			if (!inner) return;
+			if (!inner || !appId) return;
 			const innerPath = inner.pathname.replace(new RegExp(`^/${appId}/?`), '');
-			const want = `/x/${appId}/${innerPath}`;
-			if (want !== $page.url.pathname) {
+			const want = shellUrlFor(appId, innerPath, $page.url.searchParams.get('client'));
+			if (want !== `${$page.url.pathname}${$page.url.search}`) {
 				replaceState(want, {});
 			}
 		} catch {

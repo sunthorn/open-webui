@@ -78,6 +78,7 @@ export const ICON = {
 	/** book-open. The knowledge base, not a single document. */
 	book: 'M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25',
 	note: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z',
+	inbox: 'M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z',
 	/** three lines with knobs -- adjustments-horizontal. Options, never the gear. */
 	sliders:
 		'M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75',
@@ -195,6 +196,16 @@ export const APPS: AppDef[] = [
 				href: '/x/salem/kb',
 				icon: ICON.book
 			},
+			{
+				kind: 'link',
+				id: 'salem-unassigned',
+				// What arrived with no client -- imports, vendor recordings, mail and
+				// drive files the matcher could not place. The count beside it is
+				// the inbox size (spec 2026-10-08 §4.1).
+				label: 'Unassigned',
+				href: '/x/salem/unassigned',
+				icon: ICON.inbox
+			},
 			{ kind: 'divider' },
 			optionsRow('salem')
 		],
@@ -263,24 +274,10 @@ export const APPS: AppDef[] = [
 			},
 			{
 				kind: 'link',
-				id: 'finny-templates',
-				label: 'Templates',
-				href: '/x/finny/templates',
-				icon: ICON.spark
-			},
-			{
-				kind: 'link',
 				id: 'finny-documents',
 				label: 'Documents',
 				href: '/x/finny/documents',
 				icon: ICON.doc
-			},
-			{
-				kind: 'link',
-				id: 'finny-teams',
-				label: 'Teams',
-				href: '/x/finny/teams',
-				icon: ICON.users
 			},
 			{ kind: 'divider' },
 			optionsRow('finny')
@@ -288,10 +285,24 @@ export const APPS: AppDef[] = [
 		options: [
 			{
 				kind: 'link',
+				id: 'finny-templates',
+				label: 'Templates',
+				href: '/x/finny/templates',
+				icon: ICON.spark
+			},
+			{
+				kind: 'link',
 				id: 'finny-org',
 				label: 'Organisation',
 				href: '/x/finny/settings/organization',
 				icon: ICON.building
+			},
+			{
+				kind: 'link',
+				id: 'finny-teams',
+				label: 'Teams',
+				href: '/x/finny/teams',
+				icon: ICON.users
 			},
 			{
 				kind: 'link',

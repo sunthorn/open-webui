@@ -5,7 +5,6 @@ import type { ActiveClient } from './activeClient';
 const recent = (id: string, name: string): ActiveClient => ({
 	id,
 	name,
-	mode: 'existing',
 	since: '2026-09-09T00:00:00.000Z'
 });
 
@@ -44,15 +43,5 @@ describe('mergeRows', () => {
 	it('matches a recent case-insensitively', () => {
 		const rows = mergeRows([recent('1', 'Abbey, Vanessa')], [], 'VANESSA');
 		expect(rows).toEqual([{ id: '1', name: 'Abbey, Vanessa', recent: true }]);
-	});
-
-	it('skips a recent lead, which has no XPLAN id to switch to', () => {
-		const lead: ActiveClient = {
-			id: 'new:Jane Doe',
-			name: 'Jane Doe',
-			mode: 'new',
-			since: '2026-09-09T00:00:00.000Z'
-		};
-		expect(mergeRows([lead], [], '')).toEqual([]);
 	});
 });

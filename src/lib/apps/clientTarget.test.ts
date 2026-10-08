@@ -1,39 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { finnyClientTarget, withClient, rescopeUrl } from './clientTarget';
+import { finnyClientTarget, withClient, rescopeUrl, scopeRowHref, shellUrlFor } from './clientTarget';
 
 describe('finnyClientTarget', () => {
 	it('routes to the client profile when there is an XPLAN id', () => {
-		expect(finnyClientTarget('899317', null)).toEqual({
+		expect(finnyClientTarget('899317')).toEqual({
 			kind: 'ready',
 			href: '/x/finny/clients/899317'
 		});
 	});
 
 	it('appends the tab when one is asked for', () => {
-		expect(finnyClientTarget('899317', null, 'documents')).toEqual({
+		expect(finnyClientTarget('899317', 'documents')).toEqual({
 			kind: 'ready',
 			href: '/x/finny/clients/899317?tab=documents'
 		});
 	});
 
 	it('encodes an id that would otherwise break the path', () => {
-		const t = finnyClientTarget('a/b?c', null);
+		const t = finnyClientTarget('a/b?c');
 		expect(t).toEqual({ kind: 'ready', href: '/x/finny/clients/a%2Fb%3Fc' });
 	});
 
-	it('reports a lead, and carries its name for the message', () => {
-		expect(finnyClientTarget(null, 'Jane Doe')).toEqual({ kind: 'lead', name: 'Jane Doe' });
-	});
-
-	it('reports nothing selected when there is neither an id nor a lead', () => {
-		expect(finnyClientTarget(null, null)).toEqual({ kind: 'none' });
-	});
-
-	it('prefers the id over the lead name when both are somehow present', () => {
-		expect(finnyClientTarget('899317', 'Jane Doe')).toEqual({
-			kind: 'ready',
-			href: '/x/finny/clients/899317'
-		});
+	it('reports nothing selected when there is no id', () => {
+		expect(finnyClientTarget(null)).toEqual({ kind: 'none' });
 	});
 });
 
@@ -80,5 +69,38 @@ describe('rescopeUrl', () => {
 
 	it('returns null for the finny gate route itself', () => {
 		expect(rescopeUrl('/x/finny/client', '899317')).toBeNull();
+	});
+});
+
+describe('scopeRowHref', () => {
+	it('scopes salem rows', () => {
+		expect(scopeRowHref('salem', 'salem-notes', '/x/salem/notes', '899317')).toBe('/x/salem/notes?client=899317');
+	});
+	it('scopes the finny Documents row only', () => {
+		expect(scopeRowHref('finny', 'finny-documents', '/x/finny/documents', '899317')).toBe('/x/finny/documents?client=899317');
+		expect(scopeRowHref('finny', 'finny-templates', '/x/finny/templates', '899317')).toBe('/x/finny/templates');
+	});
+	it('leaves axi rows and no-client cases alone', () => {
+		expect(scopeRowHref('xplan', 'xplan-clients', '/apps/clients', '899317')).toBe('/apps/clients');
+		expect(scopeRowHref('salem', 'salem-notes', '/x/salem/notes', null)).toBe('/x/salem/notes');
+	});
+});
+
+describe('shellUrlFor', () => {
+	it('keeps the client on the address bar after the frame navigates', () => {
+		expect(shellUrlFor('salem', 'notes', '899317')).toBe('/x/salem/notes?client=899317');
+	});
+	it('is the bare path with no client', () => {
+		expect(shellUrlFor('salem', 'meetings', null)).toBe('/x/salem/meetings');
+	});
+	it('encodes the id', () => {
+		expect(shellUrlFor('salem', 'kb', 'a b')).toBe('/x/salem/kb?client=a%20b');
+	});
+});
+
+describe('rescopeUrl for finny documents', () => {
+	it('re-scopes the Documents page when the client changes', () => {
+		expect(rescopeUrl('/x/finny/documents', '1')).toBe('/x/finny/documents?client=1');
+		expect(rescopeUrl('/x/finny/documents', null)).toBe('/x/finny/documents');
 	});
 });
