@@ -9,7 +9,7 @@
 	import { goto } from '$app/navigation';
 	import { activeClient, linkableClientId } from '$lib/apps/activeClient';
 	import { getOnboarding, setAction, setStage, type OnboardingState, type Step } from '$lib/apis/gateway/onboarding';
-	import { actionMessage, byStep, doneCount } from '$lib/apps/onboarding';
+	import { STAGE_LABEL, STAGE_PAGE, actionMessage, byStep, doneCount } from '$lib/apps/onboarding';
 	import { refreshJobs } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
 
@@ -30,6 +30,8 @@
 	// Bumped on every open(): an await resuming under a newer generation
 	// belongs to a client no longer on screen and must not write anything.
 	let openGen = 0;
+	// A write in flight: ticks and stage moves wait for it.
+	let busy = false;
 	const token = () => localStorage.getItem('token') ?? '';
 
 	/** Read `id`'s rows. Dropped if the planner switched client meanwhile. */
@@ -51,6 +53,7 @@
 		requestedFor = id;
 		state = null;
 		error = '';
+		busy = false;
 		if (!id) {
 			loading = false;
 			return;
@@ -71,7 +74,8 @@
 	const tick = async (step: Step, done: boolean) => {
 		const gen = openGen;
 		const id = state?.lead.xplanClientId;
-		if (!id) return;
+		if (!id || busy) return;
+		busy = true;
 		try {
 			await setAction(token(), id, step, done ? 'pending' : 'done');
 		} catch (e) {
@@ -79,6 +83,7 @@
 		}
 		if (gen !== openGen) return;
 		await load(id, gen);
+		busy = false;
 	};
 
 	// A lead still at enquiry has no discovery rows yet. Moving it here is the
@@ -86,7 +91,8 @@
 	const moveHere = async () => {
 		const gen = openGen;
 		const id = state?.lead.xplanClientId;
-		if (!id) return;
+		if (!id || busy) return;
+		busy = true;
 		try {
 			await setStage(token(), id, 'discovery');
 		} catch (e) {
@@ -94,23 +100,28 @@
 		}
 		if (gen !== openGen) return;
 		await load(id, gen);
+		busy = false;
 	};
 
 	const continueToDataEntry = async () => {
 		const gen = openGen;
 		const id = state?.lead.xplanClientId;
-		if (!id) return;
+		if (!id || busy) return;
+		busy = true;
 		try {
 			await setStage(token(), id, 'data_entry');
 			if (gen === openGen) goto('/apps/data-entry');
 		} catch (e) {
 			if (gen === openGen) error = actionMessage(e);
 		}
+		if (gen === openGen) busy = false;
 	};
 
 	$: actions = state?.actions ?? [];
 	$: map = byStep(actions);
-	$: atEnquiry = state?.lead.stage === 'enquiry';
+	$: stage = state?.lead.stage;
+	$: atEnquiry = stage === 'enquiry';
+	$: pastDiscovery = !!stage && stage !== 'enquiry' && stage !== 'discovery';
 	$: completed = doneCount(actions, 'discovery');
 	$: allDone = completed === ROWS.length;
 </script>
@@ -126,6 +137,7 @@
 		<p class="text-sm text-gray-500">Loading…</p>
 	{:else if !state}
 		<p class="text-sm text-red-600 dark:text-red-400">{error || 'Could not load this client.'}</p>
+		<button on:click={() => open($linkableClientId)} class="mt-3 text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 transition">Retry</button>
 	{:else}
 		<div class="mb-8 flex items-start justify-between gap-4">
 			<div>
@@ -142,7 +154,14 @@
 				<p class="text-sm">This client is still at Stage 1.</p>
 				<div class="flex justify-center gap-2 mt-3">
 					<button on:click={() => goto('/apps/enquiry')} class="text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 transition">← Finish the enquiry</button>
-					<button on:click={moveHere} class="text-sm px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 transition">Move to Discovery anyway</button>
+					<button on:click={moveHere} disabled={busy} class="text-sm px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 transition">Move to Discovery anyway</button>
+				</div>
+			</div>
+		{:else if pastDiscovery && stage}
+			<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 p-6 text-center">
+				<p class="text-sm">This client is at {STAGE_LABEL[stage]}.</p>
+				<div class="flex justify-center mt-3">
+					<button on:click={() => goto(STAGE_PAGE[stage] ?? '/apps/clients')} class="text-sm px-3 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 transition">{STAGE_PAGE[stage] ? `Open ${STAGE_LABEL[stage]}` : 'Back to Clients'}</button>
 				</div>
 			</div>
 		{:else}
@@ -150,7 +169,7 @@
 				{#each ROWS as s}
 					{@const done = map.get(s.step)?.status === 'done'}
 					<label class="flex items-start gap-3 px-4 py-3.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850 transition">
-						<input type="checkbox" checked={done} on:change={() => tick(s.step, done)} class="mt-0.5 size-4 rounded accent-black dark:accent-white" />
+						<input type="checkbox" checked={done} disabled={busy} on:click|preventDefault={() => tick(s.step, done)} class="mt-0.5 size-4 rounded accent-black dark:accent-white" />
 						<div class="min-w-0">
 							<p class="text-sm font-medium {done ? 'line-through text-gray-400' : ''}">{s.title}</p>
 							<p class="text-xs text-gray-500 mt-0.5">{s.detail}</p>
@@ -160,7 +179,7 @@
 			</div>
 			<div class="flex items-center justify-between gap-3 mt-5">
 				<button on:click={() => goto('/apps/enquiry')} class="text-sm text-gray-500 hover:text-black dark:hover:text-white">← Enquiry</button>
-				<button on:click={continueToDataEntry} disabled={!allDone} class="rounded-xl bg-black text-white dark:bg-white dark:text-black px-4 py-2.5 text-sm font-medium hover:opacity-90 disabled:opacity-40 transition">Continue to Data Entry &amp; Research →</button>
+				<button on:click={continueToDataEntry} disabled={!allDone || busy} class="rounded-xl bg-black text-white dark:bg-white dark:text-black px-4 py-2.5 text-sm font-medium hover:opacity-90 disabled:opacity-40 transition">Continue to Data Entry &amp; Research →</button>
 			</div>
 			{#if !allDone}<p class="text-xs text-gray-400 mt-3">Complete discovery to move this client to Data Entry &amp; Research.</p>{/if}
 		{/if}
