@@ -263,6 +263,16 @@ describe('sourceChip', () => {
 		expect(sourceChip('m365', {}, rows, fmt)).toMatchObject({ state: 'warn', text: 'reconnect', action: 'connect' });
 		expect(sourceChip('google', { google: { status: 'error', message: 'x' } }, rows, fmt)).toMatchObject({ state: 'warn', text: 'reconnect' });
 	});
+	it('a connected provider missing a send scope asks to reconnect to enable sending', () => {
+		const rows = {
+			m365: { status: 'ok' as const, email: 'a@b.c', missing_scopes: ['Mail.Send', 'Mail.Read'] },
+			google: { status: 'ok' as const, email: 'g@b.c', missing_scopes: [] }
+		};
+		expect(sourceChip('m365', {}, rows, fmt)).toMatchObject({ state: 'warn', text: 'Reconnect to enable sending', action: 'connect' });
+		expect(sourceChip('google', {}, rows, fmt)).toMatchObject({ state: 'ok', text: 'g@b.c', action: 'disconnect' });
+		// An older gateway that omits the field changes nothing.
+		expect(sourceChip('google', {}, { m365: { status: 'disconnected' }, google: { status: 'ok', email: 'g@b.c' } }, fmt).state).toBe('ok');
+	});
 	it('XPLAN is read, locked or not read yet — never connect', () => {
 		expect(sourceChip('xplan', { xplan: { status: 'ok', readAt: '2026-09-20T04:30:00Z' } }, null, fmt)).toMatchObject({ state: 'ok', text: 'read 14:30' });
 		expect(sourceChip('xplan', { xplan: { status: 'ok' } }, null, fmt).text).toBe('read');

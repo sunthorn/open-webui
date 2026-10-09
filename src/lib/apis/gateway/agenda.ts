@@ -61,6 +61,8 @@ export interface AgendaResponse {
 export interface ConnectorStatus {
 	status: 'ok' | 'reauth' | 'revoked' | 'disconnected';
 	email?: string;
+	/** Required scopes the grant lacks (onboarding spec §6.1); non-empty → reconnect chip. */
+	missing_scopes?: string[];
 }
 export type ConnectorsResponse = Record<ConnectorProvider, ConnectorStatus>;
 

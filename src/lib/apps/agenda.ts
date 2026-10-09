@@ -273,5 +273,8 @@ export const sourceChip = (
 	const c = connectors?.[s as ConnectorProvider];
 	if (!c || c.status === 'disconnected') return { source: s, label, color, state: 'off', text: 'connect', action: 'connect' };
 	if (c.status !== 'ok' || st?.status === 'error') return { source: s, label, color, state: 'warn', text: 'reconnect', action: 'connect' };
+	// Connected, but before Mail.Send existed: sending/booking would refuse
+	// with needs_reconnect, so say so here, where the fix (one click) lives.
+	if (c.missing_scopes?.length) return { source: s, label, color, state: 'warn', text: 'Reconnect to enable sending', action: 'connect' };
 	return { source: s, label, color, state: 'ok', text: c.email ?? 'connected', action: 'disconnect' };
 };

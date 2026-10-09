@@ -51,7 +51,7 @@
 				<span class="text-gray-500 group-hover:hidden">✓ {c.text}</span>
 				{#if c.action === 'disconnect'}<span class="hidden group-hover:inline text-red-600 dark:text-red-400">disconnect</span>{/if}
 			{:else if c.action === 'connect'}
-				<span class="{c.state === 'warn' ? '' : 'text-gray-600 dark:text-gray-300'} underline decoration-dotted underline-offset-2">{c.state === 'warn' ? '↻ reconnect' : '+ connect'}</span>
+				<span class="{c.state === 'warn' ? '' : 'text-gray-600 dark:text-gray-300'} underline decoration-dotted underline-offset-2">{c.state === 'warn' ? `↻ ${c.text}` : '+ connect'}</span>
 			{:else}
 				<span class="text-gray-500">{c.text}</span>
 			{/if}
