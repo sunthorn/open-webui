@@ -213,6 +213,13 @@ describe('Stage 1 page actions', () => {
 		expect(pickNeedsAgain(a(BOOK_STEP, 'failed', { error: { code: 'sent_unrecorded' } }))).toBe(true);
 	});
 
+	it('an unticked meeting that still holds its event counts as booked', () => {
+		const row = { ...a(BOOK_STEP, 'pending'), eventRef: 'ev1' } as OnboardingAction;
+		expect(pickNeedsAgain(row)).toBe(true);
+		const failed = { ...a(BOOK_STEP, 'failed', { error: { code: 'no_slots' } }), eventRef: 'ev1' };
+		expect(pickNeedsAgain(failed as OnboardingAction)).toBe(true);
+	});
+
 	it('maps identity_unavailable to sign out and back in; other errors pass through', () => {
 		expect(actionMessage(new GatewayError('identity_unavailable', 503))).toMatch(
 			/sign out and back in/i

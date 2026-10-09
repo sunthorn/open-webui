@@ -162,8 +162,11 @@ export const sendsAgain = (mode: SendMode): boolean => mode === 'again' || mode 
  * A slot pick on a booked row (sent/done, or booked-but-unrecorded) must say
  * `again`: booking clears the offered slots, so "Book again" first proposes
  * fresh ones without a slot, and the pick is the explicit second invite.
+ * A row holding an eventRef has an invite out whatever its status (an
+ * untick keeps it), so it counts as booked too.
  */
 export const pickNeedsAgain = (a: OnboardingAction): boolean =>
+	!!a.eventRef ||
 	a.status === 'sent' ||
 	a.status === 'done' ||
 	(a.status === 'failed' && errorOf(a)?.code === 'sent_unrecorded');
