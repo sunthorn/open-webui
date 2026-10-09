@@ -37,6 +37,7 @@
 		lastRunAt,
 		mergeNoteDrafts,
 		newSinceLastRun,
+		notesToKeep,
 		previousOf,
 		skippedStores,
 		stageAtLeast,
@@ -73,6 +74,10 @@
 	let noteDrafts: Record<string, string> = {};
 	let pendingNotes: Record<string, PendingNote> = {};
 	let savingNote: Record<string, number> = {};
+	// Per step, bumped on every keystroke and every finished save. A reload
+	// whose GET started before a bump may carry the note from before it.
+	let noteRev: Record<string, number> = {};
+	const bumpRev = (step: string) => (noteRev[step] = (noteRev[step] ?? 0) + 1);
 	const NOTE_DEBOUNCE_MS = 800;
 
 	const token = () => localStorage.getItem('token') ?? '';
@@ -85,11 +90,12 @@
 
 	/** Read `id`'s rows. Dropped if the planner switched client meanwhile. */
 	const load = async (id: string, gen: number = openGen) => {
+		const revAtStart = { ...noteRev };
 		try {
 			const next = await getOnboarding(token(), id);
 			if (gen !== openGen) return;
 			state = next;
-			noteDrafts = mergeNoteDrafts(noteDrafts, next.actions, heldSteps());
+			noteDrafts = mergeNoteDrafts(noteDrafts, next.actions, notesToKeep(heldSteps(), revAtStart, noteRev));
 			error = '';
 		} catch (e) {
 			if (gen !== openGen) return;
@@ -103,6 +109,7 @@
 		if (gen === openGen) savingNote = { ...savingNote, [step]: (savingNote[step] ?? 0) + 1 };
 		try {
 			await setAction(token(), id, step, null, { notes: value });
+			if (gen === openGen) bumpRev(step);
 			if (gen === openGen && state) {
 				state = {
 					...state,
@@ -132,6 +139,7 @@
 		const gen = openGen;
 		const step = a.step;
 		noteDrafts = { ...noteDrafts, [step]: value };
+		bumpRev(step);
 		clearTimeout(pendingNotes[step]?.timer);
 		const timer = setTimeout(() => {
 			if (pendingNotes[step]?.timer !== timer) return;
@@ -155,6 +163,7 @@
 		seen = [];
 		noteDrafts = {};
 		savingNote = {};
+		noteRev = {};
 		if (!id) {
 			loading = false;
 			return;

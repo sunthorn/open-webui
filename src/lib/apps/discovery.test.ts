@@ -12,6 +12,7 @@ import {
 	isAnalysing,
 	analyseOutcome,
 	mergeNoteDrafts,
+	notesToKeep,
 	stepId
 } from './discovery';
 
@@ -148,6 +149,23 @@ describe('mergeNoteDrafts', () => {
 
 	it('falls back to the saved note when a held step has no draft', () => {
 		expect(mergeNoteDrafts({}, actions, ['discovery.clarify_goals'])['discovery.clarify_goals']).toBe('saved A');
+	});
+});
+
+describe('notesToKeep', () => {
+	it('keeps held steps and any step whose revision moved during the load', () => {
+		expect(notesToKeep(['a'], { b: 1, c: 2 }, { b: 2, c: 2, d: 1 }).sort()).toEqual(['a', 'b', 'd']);
+		expect(notesToKeep([], { b: 1 }, { b: 1 })).toEqual([]);
+	});
+
+	it('a save that finished during the load still beats the stale server note', () => {
+		// The planner typed "new", its save landed while a tick's GET was out,
+		// so nothing is pending or saving any more — but the GET read "old".
+		const revAtStart = { 'discovery.clarify_goals': 1 };
+		const revNow = { 'discovery.clarify_goals': 2 };
+		const stale = [action('discovery.clarify_goals', 'ready', { notes: 'old' })];
+		const keep = notesToKeep([], revAtStart, revNow);
+		expect(mergeNoteDrafts({ 'discovery.clarify_goals': 'new' }, stale, keep)).toEqual({ 'discovery.clarify_goals': 'new' });
 	});
 });
 

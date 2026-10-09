@@ -123,3 +123,18 @@ export const mergeNoteDrafts = (
 	}
 	return next;
 };
+
+/**
+ * The steps whose draft a reload must keep: those still being typed or saved
+ * now (`held`), plus any whose revision moved while the GET was out — that
+ * GET may have read the server before the keystroke or save it missed.
+ */
+export const notesToKeep = (
+	held: Iterable<string>,
+	revAtStart: Record<string, number>,
+	revNow: Record<string, number>
+): string[] => {
+	const keep = new Set(held);
+	for (const [step, rev] of Object.entries(revNow)) if ((revAtStart[step] ?? 0) !== rev) keep.add(step);
+	return [...keep];
+};
