@@ -185,7 +185,7 @@ export const saveOverviewSnapshot = async (token: string, snapshot: OverviewSnap
 };
 
 // --- Generic agent-output access ------------------------------------------
-// For surfaces that just need to read/write a keyed JSON document (e.g. leads).
+// For surfaces that just need to read/write a keyed JSON document (e.g. onboarding sessions).
 
 export const getOutput = async <T = unknown>(token: string, key: string): Promise<T | null> => {
 	const res = await fetch(`${gatewayUrl()}/gw/outputs/${key}`, {

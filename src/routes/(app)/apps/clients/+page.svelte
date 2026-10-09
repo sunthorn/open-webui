@@ -19,6 +19,8 @@
 		recentClients,
 		setActiveClient
 	} from '$lib/apps/activeClient';
+	import { listLeads, STAGES, type OnboardingLead, type Stage } from '$lib/apis/gateway/onboarding';
+	import { STAGE_LABEL, STAGE_PAGE } from '$lib/apps/onboarding';
 	import { type XplanClient } from '$lib/apis/xplan';
 	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
@@ -40,6 +42,10 @@
 		type: XplanEntityType | null;
 	})[] = [];
 	let syncErr = '';
+	// Every client with an onboarding lead, from data-layer — grouped by
+	// stage below. Names come from the synced book; a lead whose client has
+	// dropped out of the book shows its id.
+	let leads: OnboardingLead[] = [];
 
 	const token = () => localStorage.getItem('token') ?? '';
 	const nowIso = () => new Date().toISOString();
@@ -65,6 +71,11 @@
 	};
 
 	onMount(async () => {
+		try {
+			leads = await listLeads(token());
+		} catch (e) {
+			console.warn('onboarding leads:', e);
+		}
 		try {
 			const b = await getBriefing(token());
 			if (b) {
@@ -161,9 +172,9 @@
 		}
 	};
 
-	const pickExisting = (name: string, id = '') => {
+	const pickExisting = (name: string, id = '', to = '/apps/clients/detail') => {
 		setActiveClient({ id: id || '', name, since: nowIso() });
-		goto('/apps/clients/detail');
+		goto(to);
 	};
 
 	/**
@@ -329,6 +340,20 @@
 	$: bookFiltered = q ? bookMatches : bookMatches.slice(0, browseLimit);
 	$: recentFiltered = $recentClients.filter((c) => !q || c.name.toLowerCase().includes(q));
 	$: attentionFiltered = attention.filter((n) => !q || n.toLowerCase().includes(q));
+
+	const nameOf = (id: string) => book.find((c) => c.id === id)?.name ?? `Client ${id}`;
+	const openLead = (lead: OnboardingLead) =>
+		pickExisting(nameOf(lead.xplanClientId), lead.xplanClientId, STAGE_PAGE[lead.stage] ?? '/apps/clients/detail');
+	// Grouped in process order; only stages with someone in them are shown.
+	$: onboardingGroups = (Object.keys(STAGES) as Stage[])
+		.map((stage) => ({
+			stage,
+			leads: leads
+				.filter((l) => l.stage === stage)
+				.map((l) => ({ ...l, name: nameOf(l.xplanClientId) }))
+				.filter((l) => !q || l.name.toLowerCase().includes(q))
+		}))
+		.filter((g) => g.leads.length);
 </script>
 
 <!--
@@ -439,6 +464,29 @@
 			</div>
 		</section>
 	{/if}
+
+	<!-- In onboarding: every client with a lead, by stage (spec §5.4). -->
+	<section>
+		<h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">In onboarding</h2>
+		{#if onboardingGroups.length}
+			{#each onboardingGroups as g}
+				<p class="text-[11px] font-medium text-gray-400 mt-3 mb-1">{STAGE_LABEL[g.stage]} · {g.leads.length}</p>
+				<div class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
+					{#each g.leads as lead}
+						<button on:click={() => openLead(lead)} class="w-full flex items-center gap-3 px-4 py-3 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-850 transition">
+							<span class="size-8 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 flex items-center justify-center text-xs font-semibold shrink-0">{lead.name.slice(0, 1).toUpperCase()}</span>
+							<span class="flex-1 min-w-0 truncate">{lead.name}</span>
+							<span class="text-xs text-gray-400 tabular-nums">{lead.done ?? 0}/{lead.total ?? 0} done</span>
+						</button>
+					{/each}
+				</div>
+			{/each}
+		{:else}
+			<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
+				<p class="text-sm text-gray-500">Nobody is in onboarding yet. Pick a client and open New Enquiry to start.</p>
+			</div>
+		{/if}
+	</section>
 
 	<!-- Search + filters. Sits directly above the list it acts on: both the
 	     filters and the box narrow the same book, and putting them at the top
