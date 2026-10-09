@@ -187,6 +187,15 @@ describe('Stage 1 page actions', () => {
 		expect(sendModeOf(a('enquiry.fsg', 'done'))).toBeNull();
 	});
 
+	it('a failed row that was sent before only offers Send again (a failed Regenerate)', () => {
+		const row = {
+			...withDraft('failed', { error: { code: 'no_template' } }),
+			emailRef: 'm1'
+		} as OnboardingAction;
+		expect(sendModeOf(row)).toBe('again');
+		expect(sendsAgain(sendModeOf(row)!)).toBe(true);
+	});
+
 	it('a sent-but-unrecorded row only offers an explicit Send again', () => {
 		const row = withDraft('failed', { error: { code: 'sent_unrecorded' } });
 		expect(sendModeOf(row)).toBe('unrecorded');

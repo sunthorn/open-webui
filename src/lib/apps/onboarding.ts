@@ -135,8 +135,9 @@ export const canSend = (a: OnboardingAction): boolean => a.status === 'ready' &&
 
 /**
  * Which Send a document row offers (onboarding-stages.md §4 send gate):
- * `send` on ready; `again` on sent; `retry` on a failed row that kept its
- * draft (a send-side failure); `unrecorded` when the mail went out but the
+ * `send` on ready; `again` on sent, or on a failed row that was ever sent
+ * (has an emailRef); `retry` on a failed row that kept its draft and was
+ * never sent (a send-side failure); `unrecorded` when the mail went out but the
  * row could not say so — only an explicit "Send again" is offered then,
  * because a plain retry would mail the client twice.
  */
@@ -145,8 +146,12 @@ export type SendMode = 'send' | 'again' | 'retry' | 'unrecorded';
 export const sendModeOf = (a: OnboardingAction): SendMode | null => {
 	if (a.status === 'ready') return 'send';
 	if (a.status === 'sent') return 'again';
-	if (a.status === 'failed' && a.draftRef)
-		return errorOf(a)?.code === 'sent_unrecorded' ? 'unrecorded' : 'retry';
+	if (a.status === 'failed' && a.draftRef) {
+		if (errorOf(a)?.code === 'sent_unrecorded') return 'unrecorded';
+		// Sent before (a Regenerate that then failed): a plain Send would mail
+		// the client the same document twice.
+		return a.emailRef ? 'again' : 'retry';
+	}
 	return null;
 };
 
