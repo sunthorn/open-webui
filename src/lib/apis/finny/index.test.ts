@@ -31,7 +31,9 @@ const stub = (replies: Reply[]) => {
 	return calls;
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 const DOC = {
 	id: 'doc1',
