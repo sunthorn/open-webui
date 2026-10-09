@@ -136,7 +136,11 @@
 	 * Worse, the status probe reads login state from the URL, and a 404
 	 * '/dashboard/' carries no login marker, so it reported "signed in".
 	 *
-	 * So: send them to the login page unless we already believe they are in.
+	 * Sending signed-out users to '/login2' instead still went wrong whenever
+	 * the session expired under an app tab: the status read "signed in" and the
+	 * button opened the 404 again (2026-10-10). So it always opens '/home',
+	 * which IS the login form when signed out, and asks the gateway to press
+	 * Login if Chrome autofilled a saved password.
 	 *
 	 * The tab opens in the OTHER browser window and nothing here can raise it —
 	 * the caretaker serves /health, /heartbeat and /relaunch, and has no focus
@@ -147,7 +151,7 @@
 		signingIn = true;
 		signInErr = '';
 		try {
-			await openInXplan(token(), loggedIn === true ? '/dashboard/' : '/login2');
+			await openInXplan(token(), '/home', { signIn: true });
 			await pollUntil(() => loggedIn === true);
 		} catch (e: any) {
 			signInErr = typeof e === 'string' ? e : (e?.message ?? 'Could not open XPLAN');

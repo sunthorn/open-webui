@@ -298,12 +298,18 @@ export const relaunchDebugBrowser = async (token: string): Promise<void> => {
 
 /** Open an XPLAN page in the DEBUG browser (where the planner is signed in) —
  *  a plain link would open in this browser and land on a login page.
- *  `path` is site-relative, e.g. '/xtasks/framelist/todo'. */
-export const openInXplan = async (token: string, path: string): Promise<void> => {
+ *  `path` is site-relative, e.g. '/xtasks/framelist/todo'. With `signIn` on
+ *  '/home', the gateway presses Login once if Chrome autofilled a saved
+ *  password (no credential passes through axi). */
+export const openInXplan = async (
+	token: string,
+	path: string,
+	opts: { signIn?: boolean } = {}
+): Promise<void> => {
 	const res = await fetch(`${gatewayUrl()}/gw/xplan/open`, {
 		method: 'PUT',
 		headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-		body: JSON.stringify({ path })
+		body: JSON.stringify(opts.signIn ? { path, signIn: true } : { path })
 	});
 	if (!res.ok) {
 		throw await gatewayError(res);
