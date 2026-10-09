@@ -10,7 +10,25 @@
 // Design:   docs/superpowers/specs/2026-09-06-sync-jobs-design.md
 import { gatewayError, gatewayUrl } from './index';
 
-export type SyncJobKind = 'book_sync' | 'deep_sync' | 'briefing' | 'overview';
+export type SyncJobKind =
+	| 'book_sync'
+	| 'deep_sync'
+	| 'briefing'
+	| 'overview'
+	// Onboarding (shared-contracts/onboarding-stages.md §4). Started through
+	// runAction() in ./onboarding.ts, never through startSyncJob().
+	| 'onb_draft'
+	| 'onb_send'
+	| 'onb_book'
+	| 'onb_detect'
+	| 'onb_analyse'
+	| 'profile_fill';
+
+/**
+ * Kinds the top-bar indicator never shows: beat's 15-minute reply check runs
+ * for the whole tenant and a Stop on it would be meaningless (amendment N2).
+ */
+export const HIDDEN_KINDS: readonly SyncJobKind[] = ['onb_detect'];
 
 export type SyncJobStatus =
 	| 'queued'
@@ -64,7 +82,13 @@ export const KIND_LABEL: Record<SyncJobKind, string> = {
 	book_sync: 'Client book',
 	deep_sync: 'Client sync',
 	briefing: 'Briefing',
-	overview: 'Overview'
+	overview: 'Overview',
+	onb_draft: 'Drafting',
+	onb_send: 'Sending',
+	onb_book: 'Booking',
+	onb_detect: 'Checking replies',
+	onb_analyse: 'Analysing',
+	profile_fill: 'Profile'
 };
 
 const auth = (token: string) => ({
@@ -104,7 +128,7 @@ export const getSyncJobs = async (token: string): Promise<JobsSnapshot> => {
 	// reads `snap.last.briefing`, and guarding that on each access is how a
 	// missing key becomes a crash on a page the planner is looking at.
 	return {
-		running: body?.running ?? [],
+		running: ((body?.running ?? []) as SyncJob[]).filter((j) => !HIDDEN_KINDS.includes(j.kind)),
 		last: body?.last ?? {},
 		lastSuccessAt: body?.lastSuccessAt ?? {}
 	};

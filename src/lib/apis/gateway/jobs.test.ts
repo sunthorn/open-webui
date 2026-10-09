@@ -96,6 +96,17 @@ describe('getSyncJobs', () => {
 	});
 });
 
+describe('getSyncJobs hidden kinds', () => {
+	it('drops onb_detect from running (tenant-wide beat job, amendment N2)', async () => {
+		stub(200, { running: [
+			{ id: 'j1', kind: 'onb_detect', status: 'running' },
+			{ id: 'j2', kind: 'onb_draft', status: 'running' }
+		] });
+		const snap = await getSyncJobs('tok');
+		expect(snap.running.map((j) => j.id)).toEqual(['j2']);
+	});
+});
+
 describe('cancelSyncJob', () => {
 	it('PUTs to the job cancel path', async () => {
 		const calls = stub(200, { ok: true });
