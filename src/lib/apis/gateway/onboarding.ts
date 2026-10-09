@@ -42,6 +42,27 @@ export interface OnboardingLead {
 	total?: number;
 }
 
+/** Mirrors StepAnalysis in shared-contracts/types/onboarding.ts — keep in sync. */
+export interface StepAnalysis {
+	findings: string[];
+	confidence: number;
+	open_questions: string[];
+	run_at: string;
+	model: string;
+	sources: { xplan: number; documents: number; meetings: number; notes: number; passages: number; activity: number };
+	skipped: string[];
+	source_index: Record<string, string | null>;
+}
+
+/** Mirrors DiscoveryDetail in shared-contracts/types/onboarding.ts — keep in sync. */
+export interface DiscoveryDetail {
+	analysis?: StepAnalysis;
+	previous?: Omit<StepAnalysis, 'source_index'>;
+	changed_since?: string[];
+	notes?: string;
+	error?: { code: string; message: string } | null;
+}
+
 export interface OnboardingAction {
 	id: string;
 	xplanClientId: string;
@@ -52,7 +73,7 @@ export interface OnboardingAction {
 	emailRef: string | null;
 	eventRef: string | null;
 	completedBy: Actor | null;
-	detail: Record<string, unknown>;
+	detail: DiscoveryDetail & Record<string, unknown>;
 	updatedAt: string | null;
 }
 
@@ -79,7 +100,7 @@ export interface OnboardingState {
 	templates?: Record<string, boolean>;
 }
 
-export type OnboardingJobKind = 'onb_draft' | 'onb_send' | 'onb_book';
+export type OnboardingJobKind = 'onb_draft' | 'onb_send' | 'onb_book' | 'onb_analyse';
 
 const auth = (token: string) => ({
 	Authorization: `Bearer ${token}`,
@@ -108,17 +129,27 @@ export const setStage = async (
 	return await res.json();
 };
 
-/** Manual tick / untick. The gateway refuses while a draft is running (409). */
+/**
+ * Manual tick / untick, optionally with the planner's notes. The gateway
+ * refuses while a draft is running (409). `detail` is sent only when given
+ * and only carries `notes`; the gateway forwards nothing else from here, so
+ * the worker's analysis is never overwritten by the browser.
+ */
 export const setAction = async (
 	token: string,
 	client: string,
 	step: Step,
-	status: 'done' | 'pending'
+	status: 'done' | 'pending' | null,
+	detail?: { notes: string }
 ): Promise<OnboardingAction> => {
+	// status null + notes = save the notes and nothing else: a ready row must
+	// not drop to pending because the planner typed in its notes box.
+	const body: Record<string, unknown> = status ? { status } : {};
+	if (detail) body.detail = { notes: detail.notes };
 	const res = await fetch(`${base(client)}/actions/${step}`, {
 		method: 'PUT',
 		headers: auth(token),
-		body: JSON.stringify({ status })
+		body: JSON.stringify(body)
 	});
 	if (!res.ok) throw await gatewayError(res);
 	return (await res.json()).action;

@@ -80,13 +80,17 @@
 			error = 'Add at least one document.';
 			return;
 		}
+		if (!$activeClient) {
+			error = 'Pick a client first.';
+			return;
+		}
 		busy = true;
 		error = '';
 		try {
 			const docs = [];
 			for (const f of files) {
 				busyMsg = `Extracting ${f.name}…`;
-				docs.push(await extractDocument(token(), f));
+				docs.push(await extractDocument(token(), f, $activeClient!.id));
 			}
 			busyMsg = 'Asking the agent to map the data to XPLAN…';
 			proposal = await proposeMapping(token(), clientName.trim(), 'existing', docs);

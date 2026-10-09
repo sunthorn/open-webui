@@ -99,3 +99,24 @@ describe('onboarding gateway client', () => {
 		expect(calls[1].url).toBe('/gw/onboarding');
 	});
 });
+
+describe('setAction with notes', () => {
+	it('sends notes alone when status is null — a save, not an untick', async () => {
+		const calls = stub(200, { action: { step: 'discovery.clarify_goals', status: 'ready' } });
+		await setAction(TOKEN, '899317', 'discovery.clarify_goals', null, { notes: 'ask about SMSF' });
+		expect(calls[0].url).toBe('/gw/onboarding/899317/actions/discovery.clarify_goals');
+		expect(JSON.parse(String(calls[0].init.body))).toEqual({ detail: { notes: 'ask about SMSF' } });
+	});
+
+	it('sends status and notes together when both are given', async () => {
+		const calls = stub(200, { action: {} });
+		await setAction(TOKEN, '899317', 'discovery.clarify_goals', 'done', { notes: 'n' });
+		expect(JSON.parse(String(calls[0].init.body))).toEqual({ status: 'done', detail: { notes: 'n' } });
+	});
+
+	it('sends no detail for a plain tick', async () => {
+		const calls = stub(200, { action: {} });
+		await setAction(TOKEN, '899317', 'data_entry.gather_missing', 'done');
+		expect(JSON.parse(String(calls[0].init.body))).toEqual({ status: 'done' });
+	});
+});

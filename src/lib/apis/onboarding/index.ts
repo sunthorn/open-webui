@@ -1,12 +1,14 @@
 import { WEBUI_BASE_URL } from '$lib/constants';
-import { uploadFile } from '$lib/apis/files';
+import { uploadClientDocument, waitForDocumentText, type FinnyDocument } from '$lib/apis/finny';
 
 // xplan-agent · New Client Onboarding (Phase A — extract + propose, no write).
 //
-// Flow: upload each document to Open WebUI (which extracts its text via the
-// configured loaders) → send the combined text to a plain LLM with the XPLAN
-// field taxonomy → get back a structured OnboardingProposal for the planner to
-// review. No browser, no XPLAN access — so this runs with the guardrail LOCKED.
+// Flow: upload each document to FINNY as the active client's document (its
+// governed store — spec 2026-10-08 §5.4), wait for finny's ingest to extract
+// the text, then send the combined text to a plain LLM with the XPLAN field
+// taxonomy → a structured OnboardingProposal for the planner to review. No
+// browser, no XPLAN access — so this runs with the guardrail LOCKED. Nothing
+// lands in Open WebUI's file store any more.
 //
 // These types MIRROR shared-contracts/api-responses.ts (OnboardingProposal et
 // al.). The open-webui Docker build context is ./open-webui only, so it cannot
@@ -37,6 +39,8 @@ export interface OnboardingProposal {
 export interface ExtractedDoc {
 	filename: string;
 	text: string;
+	/** finny document id — set when the text came from finny (always, now). */
+	documentId?: string;
 }
 
 // Model used to structure the proposal. A plain text model (no browser tools),
@@ -44,18 +48,22 @@ export interface ExtractedDoc {
 const PROPOSE_MODEL = 'gemini-3-flash-preview';
 
 /**
- * Upload one document to Open WebUI and return its extracted text.
- * `process=true` runs OWUI's loaders (Tika/docx/xlsx/OCR) synchronously; the
- * extracted text lands in `res.data.content`.
- * @throws on upload/extract failure
+ * Upload one document to finny as `clientId`'s document and return its
+ * extracted text once finny has indexed it.
+ * @throws finny's own message on a refused file; a message naming the file
+ *         on a failed or timed-out ingest
  */
-export const extractDocument = async (token: string, file: File): Promise<ExtractedDoc> => {
-	const res = await uploadFile(token, file, null, true, false);
-	const text = (res?.data?.content ?? '').trim();
-	if (!text) {
-		throw new Error(`No text could be extracted from "${file.name}". If it's a scanned image, OCR may not be configured.`);
-	}
-	return { filename: file.name, text };
+export const extractDocument = async (token: string, file: File, clientId: string): Promise<ExtractedDoc> => {
+	const doc = await uploadClientDocument(token, clientId, file);
+	const text = await waitForDocumentText(token, doc.id, file.name);
+	return { filename: file.name, text, documentId: doc.id };
+};
+
+/** The extracted text of a document the client already has in finny. */
+export const extractExisting = async (token: string, doc: FinnyDocument): Promise<ExtractedDoc> => {
+	const filename = doc.currentVersion?.fileName ?? doc.title;
+	const text = await waitForDocumentText(token, doc.id, filename);
+	return { filename, text, documentId: doc.id };
 };
 
 // The XPLAN field taxonomy (docs/xplan-field-mapping.md), compacted for the
