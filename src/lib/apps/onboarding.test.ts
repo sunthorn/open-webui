@@ -88,6 +88,31 @@ describe('Stage 1 gating', () => {
 		expect(autoDraftSteps(null)).toEqual([]);
 	});
 
+	it('never auto-drafts a row that was drafted or sent before (an untick is not a redraft)', () => {
+		const st = (actions: OnboardingAction[]) =>
+			({
+				lead: { stage: 'enquiry' },
+				actions,
+				drive: { connected: true },
+				templates: { 'enquiry.welcome_pack': true, 'enquiry.fsg': true, 'enquiry.fact_find': true }
+			}) as unknown as OnboardingState;
+		const unticked = {
+			...a('enquiry.fsg', 'pending'),
+			draftRef: 'd1',
+			emailRef: 'm1'
+		} as OnboardingAction;
+		const draftedOnly = {
+			...a('enquiry.fact_find', 'pending'),
+			draftRef: 'd2'
+		} as OnboardingAction;
+		const sentOnly = {
+			...a('enquiry.welcome_pack', 'pending'),
+			emailRef: 'm3'
+		} as OnboardingAction;
+		expect(autoDraftSteps(st([unticked, draftedOnly, sentOnly]))).toEqual([]);
+		expect(autoDraftSteps(st([a('enquiry.fsg', 'pending')]))).toEqual(['enquiry.fsg']);
+	});
+
 	it('Send needs ready and an address', () => {
 		expect(canSend(a('enquiry.fsg', 'ready', { email: { to: 'j@x.y' } }))).toBe(true);
 		expect(canSend(a('enquiry.fsg', 'ready', { email: { to: null } }))).toBe(false);

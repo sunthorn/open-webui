@@ -96,7 +96,10 @@ export const doneCount = (actions: OnboardingAction[], stage: Stage): number =>
  * (spec §5.4, amendment R14) — unless salem says there is no drive, when
  * each would only fail with no_client_folder. A missing `templates` map
  * means the gateway did not say: do not draft blind. A `failed` row is
- * never re-run automatically: its message is the point.
+ * never re-run automatically: its message is the point. Only a row that
+ * was never drafted or sent: a `pending` row with a draftRef or emailRef
+ * is an untick, which means "not done yet", not "make a new document" —
+ * the explicit Draft button is still there for that.
  */
 export const autoDraftSteps = (state: OnboardingState | null): Step[] => {
 	if (!state || state.drive.connected === false) return [];
@@ -104,7 +107,12 @@ export const autoDraftSteps = (state: OnboardingState | null): Step[] => {
 	if (!templates) return [];
 	return state.actions
 		.filter(
-			(a) => a.status === 'pending' && DOCUMENT_STEPS.includes(a.step) && templates[a.step] === true
+			(a) =>
+				a.status === 'pending' &&
+				!a.draftRef &&
+				!a.emailRef &&
+				DOCUMENT_STEPS.includes(a.step) &&
+				templates[a.step] === true
 		)
 		.map((a) => a.step);
 };
