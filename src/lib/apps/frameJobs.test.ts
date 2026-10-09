@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { finishedMessage, parseFrameRequest, startedMessage } from './frameJobs';
+import { finishedMessage, fromOurFrame, parseFrameRequest, settleTracked, startedMessage } from './frameJobs';
 import { EMPTY_SNAPSHOT, type SyncJob } from '$lib/apis/gateway/jobs';
 
 const job = (over: Partial<SyncJob>): SyncJob => ({
@@ -43,5 +43,42 @@ describe('finishedMessage', () => {
 	it('says unknown when the job vanished without becoming the last of its kind', () => {
 		const snap = { ...EMPTY_SNAPSHOT, last: { profile_fill: job({ id: 'j2' }) } };
 		expect(finishedMessage(snap, 'j1', 'profile_fill')).toMatchObject({ axi: 'job-finished', jobId: 'j1', status: 'unknown' });
+	});
+});
+
+describe('settleTracked', () => {
+	const t = { jobId: 'j1', kind: 'profile_fill' as const, misses: 0 };
+
+	it('waits one stale snapshot before calling a missing job unknown', () => {
+		// A poll that left before the PUT can land after it and drop the
+		// optimistic row: one absence is not a vanished job.
+		const stale = { ...EMPTY_SNAPSHOT };
+		const first = settleTracked(stale, [t]);
+		expect(first.messages).toEqual([]);
+		expect(first.tracked).toEqual([{ ...t, misses: 1 }]);
+		const second = settleTracked(stale, first.tracked);
+		expect(second.messages).toEqual([expect.objectContaining({ jobId: 'j1', status: 'unknown' })]);
+		expect(second.tracked).toEqual([]);
+	});
+	it('resets the count when the job shows up running again', () => {
+		const running = { ...EMPTY_SNAPSHOT, running: [job({ status: 'running' })] };
+		expect(settleTracked(running, [{ ...t, misses: 1 }])).toEqual({ messages: [], tracked: [t] });
+	});
+	it('settles at once when the job is the last of its kind', () => {
+		const done = { ...EMPTY_SNAPSHOT, last: { profile_fill: job({ status: 'done' }) } };
+		const r = settleTracked(done, [t]);
+		expect(r.messages).toEqual([expect.objectContaining({ jobId: 'j1', status: 'done' })]);
+		expect(r.tracked).toEqual([]);
+	});
+});
+
+describe('fromOurFrame', () => {
+	const o = 'https://axi.test';
+	it('accepts only finny, from its own frame, on this origin', () => {
+		expect(fromOurFrame('finny', o, o, true)).toBe(true);
+		expect(fromOurFrame('salem', o, o, true)).toBe(false);
+		expect(fromOurFrame('finny', 'https://evil.test', o, true)).toBe(false);
+		expect(fromOurFrame('finny', o, o, false)).toBe(false);
+		expect(fromOurFrame(undefined, o, o, true)).toBe(false);
 	});
 });

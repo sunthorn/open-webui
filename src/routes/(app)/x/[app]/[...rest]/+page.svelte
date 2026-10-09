@@ -27,12 +27,13 @@
 	import { APPS } from '$lib/apps/menu';
 	import { frameSrcFor, shellUrlFor } from '$lib/apps/clientTarget';
 	import { get } from 'svelte/store';
-	import { syncJobs, syncJobsError, startJob } from '$lib/stores/syncJobs';
+	import { syncJobs, syncJobsError, startJob, startJobPolling } from '$lib/stores/syncJobs';
 	import {
-		finishedMessage,
+		fromOurFrame,
 		parseFrameRequest,
+		settleTracked,
 		startedMessage,
-		type FrameJobKind
+		type TrackedJob
 	} from '$lib/apps/frameJobs';
 
 	let frame: HTMLIFrameElement;
@@ -89,39 +90,37 @@
 	};
 
 	/** Jobs this frame asked for and has not yet been told the outcome of. */
-	let tracked: { jobId: string; kind: FrameJobKind }[] = [];
+	let tracked: TrackedJob[] = [];
+	// A different app in the pane is a different frame: its jobs are not ours.
+	const forget = () => (tracked = []);
+	$: appId, forget();
+	const token = () => localStorage.getItem('token') ?? '';
 	const post = (msg: unknown) => frame?.contentWindow?.postMessage(msg, location.origin);
 
-	// Only finny, only this frame, only this origin: anything else is not a
-	// request and gets no reply. The checks are the contract, not a security
-	// boundary — a same-origin frame could read this page's storage outright.
+	// Anything that fails the gate or the parse gets no reply and starts nothing.
 	const onMessage = async (e: MessageEvent) => {
-		if (appId !== 'finny') return;
-		if (e.origin !== location.origin || !frame || e.source !== frame.contentWindow) return;
+		if (!frame || !fromOurFrame(appId, e.origin, location.origin, e.source === frame.contentWindow))
+			return;
 		const req = parseFrameRequest(e.data);
 		if (!req) return;
-		const job = await startJob(localStorage.getItem('token') ?? '', req.kind, {
-			clientId: req.clientId
-		});
+		const job = await startJob(token(), req.kind, { clientId: req.clientId });
 		post(startedMessage(req.requestId, job, get(syncJobsError)));
 		// Two requests for one client adopt one job: track it once, so the
 		// frame hears at most one job-finished per jobId.
 		if (job && !tracked.some((t) => t.jobId === job.id)) {
-			tracked = [...tracked, { jobId: job.id, kind: req.kind }];
+			tracked = [...tracked, { jobId: job.id, kind: req.kind, misses: 0 }];
 		}
 		settle();
 	};
 
 	const settle = () => {
 		if (!tracked.length) return;
-		const snap = get(syncJobs);
-		for (const t of tracked) {
-			const msg = finishedMessage(snap, t.jobId, t.kind);
-			if (msg) {
-				post(msg);
-				tracked = tracked.filter((x) => x.jobId !== t.jobId);
-			}
-		}
+		const r = settleTracked(get(syncJobs), tracked);
+		r.messages.forEach(post);
+		tracked = r.tracked;
+		// A stale poll can also be the one that stops polling (it saw nothing
+		// running). Make sure another snapshot comes to confirm or clear the miss.
+		if (tracked.some((t) => t.misses > 0)) void startJobPolling(token());
 	};
 
 	let unsubscribe: (() => void) | undefined;
