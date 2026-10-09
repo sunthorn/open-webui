@@ -46,6 +46,7 @@
 	// stage below. Names come from the synced book; a lead whose client has
 	// dropped out of the book shows its id.
 	let leads: OnboardingLead[] = [];
+	let leadsErr = '';
 
 	const token = () => localStorage.getItem('token') ?? '';
 	const nowIso = () => new Date().toISOString();
@@ -75,6 +76,7 @@
 			leads = await listLeads(token());
 		} catch (e) {
 			console.warn('onboarding leads:', e);
+			leadsErr = "Couldn't load clients in onboarding";
 		}
 		try {
 			const b = await getBriefing(token());
@@ -341,16 +343,17 @@
 	$: recentFiltered = $recentClients.filter((c) => !q || c.name.toLowerCase().includes(q));
 	$: attentionFiltered = attention.filter((n) => !q || n.toLowerCase().includes(q));
 
-	const nameOf = (id: string) => book.find((c) => c.id === id)?.name ?? `Client ${id}`;
-	const openLead = (lead: OnboardingLead) =>
-		pickExisting(nameOf(lead.xplanClientId), lead.xplanClientId, STAGE_PAGE[lead.stage] ?? '/apps/clients/detail');
+	// Reactive on `book` (Svelte 4 does not track reads inside function bodies).
+	$: nameById = new Map(book.map((c) => [c.id, c.name]));
+	const openLead = (lead: OnboardingLead & { name: string }) =>
+		pickExisting(lead.name, lead.xplanClientId, STAGE_PAGE[lead.stage] ?? '/apps/clients/detail');
 	// Grouped in process order; only stages with someone in them are shown.
 	$: onboardingGroups = (Object.keys(STAGES) as Stage[])
 		.map((stage) => ({
 			stage,
 			leads: leads
 				.filter((l) => l.stage === stage)
-				.map((l) => ({ ...l, name: nameOf(l.xplanClientId) }))
+				.map((l) => ({ ...l, name: nameById.get(l.xplanClientId) ?? `Client ${l.xplanClientId}` }))
 				.filter((l) => !q || l.name.toLowerCase().includes(q))
 		}))
 		.filter((g) => g.leads.length);
@@ -481,6 +484,10 @@
 					{/each}
 				</div>
 			{/each}
+		{:else if leadsErr}
+			<p class="text-sm text-red-500">{leadsErr}</p>
+		{:else if q && leads.length}
+			<p class="text-sm text-gray-500">No match</p>
 		{:else}
 			<div class="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-5 text-center">
 				<p class="text-sm text-gray-500">Nobody is in onboarding yet. Pick a client and open New Enquiry to start.</p>
