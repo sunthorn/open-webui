@@ -1,6 +1,7 @@
 // Stage pages' shared logic — rows, gating, running-job lookup, chips.
 // Pure: the Svelte pages render these; nothing here fetches.
 // Spec: docs/superpowers/specs/2026-10-08-client-onboarding-design.md §5.4.
+import { GatewayError } from '$lib/apis/gateway';
 import type { JobsSnapshot, SyncJob } from '$lib/apis/gateway/jobs';
 import type {
 	ActionStatus,
@@ -123,6 +124,43 @@ export const slotOf = (a: OnboardingAction) =>
 	(a.detail?.slot as { start: string; end: string; label: string } | undefined) ?? null;
 
 export const canSend = (a: OnboardingAction): boolean => a.status === 'ready' && !!emailOf(a)?.to;
+
+/**
+ * Which Send a document row offers (onboarding-stages.md §4 send gate):
+ * `send` on ready; `again` on sent; `retry` on a failed row that kept its
+ * draft (a send-side failure); `unrecorded` when the mail went out but the
+ * row could not say so — only an explicit "Send again" is offered then,
+ * because a plain retry would mail the client twice.
+ */
+export type SendMode = 'send' | 'again' | 'retry' | 'unrecorded';
+
+export const sendModeOf = (a: OnboardingAction): SendMode | null => {
+	if (a.status === 'ready') return 'send';
+	if (a.status === 'sent') return 'again';
+	if (a.status === 'failed' && a.draftRef)
+		return errorOf(a)?.code === 'sent_unrecorded' ? 'unrecorded' : 'retry';
+	return null;
+};
+
+/** Does this Send carry `args.again`? */
+export const sendsAgain = (mode: SendMode): boolean => mode === 'again' || mode === 'unrecorded';
+
+/**
+ * A slot pick on a booked row (sent/done, or booked-but-unrecorded) must say
+ * `again`: booking clears the offered slots, so "Book again" first proposes
+ * fresh ones without a slot, and the pick is the explicit second invite.
+ */
+export const pickNeedsAgain = (a: OnboardingAction): boolean =>
+	a.status === 'sent' ||
+	a.status === 'done' ||
+	(a.status === 'failed' && errorOf(a)?.code === 'sent_unrecorded');
+
+/** A gateway refusal as the planner should read it. */
+export const actionMessage = (e: unknown): string => {
+	if (e instanceof GatewayError && e.status === 503 && e.message === 'identity_unavailable')
+		return 'axi could not act as you — sign out and back in, then try again.';
+	return e instanceof Error ? e.message : String(e);
+};
 
 /** The onboarding job queued or running for this client and step, if any. */
 export const runningFor = (snap: JobsSnapshot, client: string, step: string): SyncJob | undefined =>

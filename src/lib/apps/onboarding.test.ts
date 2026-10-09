@@ -10,8 +10,13 @@ import {
 	errorOf,
 	isStuckDrafting,
 	runningFor,
-	slotOf
+	slotOf,
+	sendModeOf,
+	sendsAgain,
+	pickNeedsAgain,
+	actionMessage
 } from './onboarding';
+import { GatewayError } from '$lib/apis/gateway';
 import type { OnboardingAction, OnboardingState } from '$lib/apis/gateway/onboarding';
 import { EMPTY_SNAPSHOT } from '$lib/apis/gateway/jobs';
 
@@ -140,5 +145,47 @@ describe('Stage 1 gating', () => {
 		expect(isStuckDrafting(row, snap('onb_draft'), '1')).toBe(false);
 		expect(isStuckDrafting(row, snap('onb_send'), '1')).toBe(true);
 		expect(isStuckDrafting(a('enquiry.fsg', 'ready'), EMPTY_SNAPSHOT, '1')).toBe(false);
+	});
+});
+
+describe('Stage 1 page actions', () => {
+	const withDraft = (status: string, detail: Record<string, unknown> = {}) =>
+		({ ...a('enquiry.fsg', status, detail), draftRef: 'd1' }) as OnboardingAction;
+
+	it('offers Send on ready, Send again on sent, a retry on a failed row that kept its draft', () => {
+		expect(sendModeOf(a('enquiry.fsg', 'ready'))).toBe('send');
+		expect(sendModeOf(a('enquiry.fsg', 'sent'))).toBe('again');
+		expect(sendModeOf(withDraft('failed', { error: { code: 'needs_connector' } }))).toBe('retry');
+		expect(sendModeOf(a('enquiry.fsg', 'failed', { error: { code: 'no_template' } }))).toBeNull();
+		expect(sendModeOf(a('enquiry.fsg', 'pending'))).toBeNull();
+		expect(sendModeOf(a('enquiry.fsg', 'done'))).toBeNull();
+	});
+
+	it('a sent-but-unrecorded row only offers an explicit Send again', () => {
+		const row = withDraft('failed', { error: { code: 'sent_unrecorded' } });
+		expect(sendModeOf(row)).toBe('unrecorded');
+		expect(sendsAgain('unrecorded')).toBe(true);
+		expect(sendsAgain('again')).toBe(true);
+		expect(sendsAgain('retry')).toBe(false);
+		expect(sendsAgain('send')).toBe(false);
+	});
+
+	it('picking a slot on a booked row needs again', () => {
+		expect(pickNeedsAgain(a(BOOK_STEP, 'pending'))).toBe(false);
+		expect(pickNeedsAgain(a(BOOK_STEP, 'failed', { error: { code: 'no_slots' } }))).toBe(false);
+		expect(pickNeedsAgain(a(BOOK_STEP, 'sent'))).toBe(true);
+		expect(pickNeedsAgain(a(BOOK_STEP, 'done'))).toBe(true);
+		expect(pickNeedsAgain(a(BOOK_STEP, 'failed', { error: { code: 'sent_unrecorded' } }))).toBe(true);
+	});
+
+	it('maps identity_unavailable to sign out and back in; other errors pass through', () => {
+		expect(actionMessage(new GatewayError('identity_unavailable', 503))).toMatch(
+			/sign out and back in/i
+		);
+		expect(actionMessage(new GatewayError('job queue unavailable', 503))).toBe(
+			'job queue unavailable'
+		);
+		expect(actionMessage(new Error('boom'))).toBe('boom');
+		expect(actionMessage('x')).toBe('x');
 	});
 });
