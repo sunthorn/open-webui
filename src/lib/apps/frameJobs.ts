@@ -118,3 +118,15 @@ export const settleTracked = (
 	}
 	return { messages, tracked: still };
 };
+
+/**
+ * Should the shell fetch one more snapshot on its own, `POLL_MS` from now?
+ *
+ * The store's poller cannot be relied on for the grace snapshot: `settle`
+ * runs inside the very poll that saw nothing running, and that poll then
+ * stops polling. So a tracked job with a miss gets a one-off follow-up; so
+ * does any tracked job when the last follow-up GET failed, because a failed
+ * GET sets no snapshot and would otherwise leave the job waiting forever.
+ */
+export const needsFollowUp = (tracked: readonly TrackedJob[], pollFailed: boolean): boolean =>
+	tracked.length > 0 && (pollFailed || tracked.some((t) => t.misses > 0));

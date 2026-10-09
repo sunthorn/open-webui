@@ -27,9 +27,10 @@
 	import { APPS } from '$lib/apps/menu';
 	import { frameSrcFor, shellUrlFor } from '$lib/apps/clientTarget';
 	import { get } from 'svelte/store';
-	import { syncJobs, syncJobsError, startJob, startJobPolling } from '$lib/stores/syncJobs';
+	import { POLL_MS, refreshJobs, syncJobs, syncJobsError, startJob } from '$lib/stores/syncJobs';
 	import {
 		fromOurFrame,
+		needsFollowUp,
 		parseFrameRequest,
 		settleTracked,
 		startedMessage,
@@ -91,8 +92,17 @@
 
 	/** Jobs this frame asked for and has not yet been told the outcome of. */
 	let tracked: TrackedJob[] = [];
+	/** The one-off snapshot a tracked job is waiting on (see followUp). */
+	let followUpTimer: ReturnType<typeof setTimeout> | null = null;
+	const cancelFollowUp = () => {
+		if (followUpTimer) clearTimeout(followUpTimer);
+		followUpTimer = null;
+	};
 	// A different app in the pane is a different frame: its jobs are not ours.
-	const forget = () => (tracked = []);
+	const forget = () => {
+		tracked = [];
+		cancelFollowUp();
+	};
 	$: appId, forget();
 	const token = () => localStorage.getItem('token') ?? '';
 	const post = (msg: unknown) => frame?.contentWindow?.postMessage(msg, location.origin);
@@ -119,8 +129,20 @@
 		r.messages.forEach(post);
 		tracked = r.tracked;
 		// A stale poll can also be the one that stops polling (it saw nothing
-		// running). Make sure another snapshot comes to confirm or clear the miss.
-		if (tracked.some((t) => t.misses > 0)) void startJobPolling(token());
+		// running), and startJobPolling is a no-op while that poll is in flight.
+		// So fetch the confirming snapshot ourselves.
+		followUp(false);
+	};
+
+	/** One snapshot POLL_MS from now if a tracked job needs it; a failed GET
+	 *  sets no snapshot (so no settle), hence the retry here. */
+	const followUp = (pollFailed: boolean) => {
+		if (followUpTimer || !needsFollowUp(tracked, pollFailed)) return;
+		followUpTimer = setTimeout(async () => {
+			followUpTimer = null;
+			await refreshJobs(token()); // success → syncJobs.set → settle → followUp
+			if (get(syncJobsError)) followUp(true);
+		}, POLL_MS);
 	};
 
 	let unsubscribe: (() => void) | undefined;
@@ -131,6 +153,8 @@
 	});
 	onDestroy(() => {
 		clearInterval(poll);
+		// Empties `tracked` too, so a follow-up GET still in flight schedules nothing.
+		forget();
 		if (typeof window !== 'undefined') window.removeEventListener('message', onMessage);
 		unsubscribe?.();
 	});

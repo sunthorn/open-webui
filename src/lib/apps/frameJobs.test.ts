@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { finishedMessage, fromOurFrame, parseFrameRequest, settleTracked, startedMessage } from './frameJobs';
+import {
+	finishedMessage,
+	fromOurFrame,
+	needsFollowUp,
+	parseFrameRequest,
+	settleTracked,
+	startedMessage
+} from './frameJobs';
 import { EMPTY_SNAPSHOT, type SyncJob } from '$lib/apis/gateway/jobs';
 
 const job = (over: Partial<SyncJob>): SyncJob => ({
@@ -80,5 +87,25 @@ describe('fromOurFrame', () => {
 		expect(fromOurFrame('finny', 'https://evil.test', o, true)).toBe(false);
 		expect(fromOurFrame('finny', o, o, false)).toBe(false);
 		expect(fromOurFrame(undefined, o, o, true)).toBe(false);
+	});
+});
+
+describe('needsFollowUp', () => {
+	const running = { jobId: 'j1', kind: 'profile_fill' as const, misses: 0 };
+	const missed = { ...running, misses: 1 };
+	it('follows up a job with a miss, even when the store has stopped polling', () => {
+		expect(needsFollowUp([missed], false)).toBe(true);
+		expect(needsFollowUp([running, missed], false)).toBe(true);
+	});
+	it('leaves a job still seen running to the store poller', () => {
+		expect(needsFollowUp([running], false)).toBe(false);
+	});
+	it('retries a failed GET while anything is tracked', () => {
+		expect(needsFollowUp([running], true)).toBe(true);
+		expect(needsFollowUp([missed], true)).toBe(true);
+	});
+	it('stops once nothing is tracked', () => {
+		expect(needsFollowUp([], false)).toBe(false);
+		expect(needsFollowUp([], true)).toBe(false);
 	});
 });
