@@ -87,6 +87,10 @@ describe('scopeRowHref', () => {
 		expect(scopeRowHref('finny', 'finny-documents', '/x/finny/documents', '899317')).toBe('/x/finny/documents?client=899317');
 		expect(scopeRowHref('finny', 'finny-templates', '/x/finny/templates', '899317')).toBe('/x/finny/templates');
 	});
+	it('scopes the finny Dashboard row, whose top tile is the active client', () => {
+		expect(scopeRowHref('finny', 'finny-dashboard', '/x/finny/', '899317')).toBe('/x/finny/?client=899317');
+		expect(scopeRowHref('finny', 'finny-dashboard', '/x/finny/', null)).toBe('/x/finny/');
+	});
 	it('leaves axi rows and no-client cases alone', () => {
 		expect(scopeRowHref('xplan', 'xplan-clients', '/apps/clients', '899317')).toBe('/apps/clients');
 		expect(scopeRowHref('salem', 'salem-notes', '/x/salem/notes', null)).toBe('/x/salem/notes');
@@ -155,5 +159,9 @@ describe('rescopeUrl for finny documents', () => {
 	it('re-scopes the Documents page when the client changes', () => {
 		expect(rescopeUrl('/x/finny/documents', '1')).toBe('/x/finny/documents?client=1');
 		expect(rescopeUrl('/x/finny/documents', null)).toBe('/x/finny/documents');
+	});
+	it('re-scopes the Dashboard, whose top tile is the active client', () => {
+		expect(rescopeUrl('/x/finny/', '1')).toBe('/x/finny/?client=1');
+		expect(rescopeUrl('/x/finny', null)).toBe('/x/finny');
 	});
 });

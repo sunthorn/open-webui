@@ -91,6 +91,9 @@ export const KIND_LABEL: Record<SyncJobKind, string> = {
 	profile_fill: 'Profile'
 };
 
+/** Kinds that are per client — two clients are two jobs (mirrors contact-layer's PER_CLIENT_KINDS). */
+export const PER_CLIENT_KINDS: readonly SyncJobKind[] = ['deep_sync', 'profile_fill'];
+
 const auth = (token: string) => ({
 	Authorization: `Bearer ${token}`,
 	'Content-Type': 'application/json'

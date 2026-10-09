@@ -14,6 +14,7 @@ import {
 	getSyncJobs,
 	startSyncJob,
 	EMPTY_SNAPSHOT,
+	PER_CLIENT_KINDS,
 	WORKER_SILENT_MS,
 	type JobsSnapshot,
 	type SyncJob,
@@ -46,9 +47,13 @@ export const runningJob = (
 	snap.running.find(
 		(j) =>
 			j.kind === kind &&
-			// Deep syncs are per client — two clients are two jobs, and matching
-			// on kind alone would put a spinner on the wrong client's page.
-			(kind !== 'deep_sync' || j.params?.clientId === clientId)
+			// Deep syncs and profile fills are per client — two clients are two
+			// jobs, and matching on kind alone would put a spinner on the wrong
+			// client's page. deep_sync rows carry `clientId`; profile_fill's
+			// server row carries `client` (the onboarding-era name), its
+			// optimistic row `clientId`.
+			(!PER_CLIENT_KINDS.includes(kind) ||
+				(j.params?.clientId ?? j.params?.client) === clientId)
 	);
 
 /**

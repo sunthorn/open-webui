@@ -30,17 +30,20 @@ export const withClient = (href: string, clientId: string | null): string =>
 
 /**
  * Which menu rows carry the active client on their href. salem scopes every
- * page by `?client=`; finny scopes by path except its Documents page, which
- * has no client in the path and reads `?client=` instead (spec 2026-10-08
- * §7). axi's own rows have no XPLAN client to carry.
+ * page by `?client=`; finny scopes by path except its Documents page and its
+ * Dashboard, which have no client in the path and read `?client=` instead
+ * (spec 2026-10-08 §7: the Dashboard's top tile is the active client's
+ * onboarding summary). axi's own rows have no XPLAN client to carry.
  */
+const FINNY_QUERY_ROWS = ['finny-documents', 'finny-dashboard'];
+
 export const scopeRowHref = (
 	appId: string | undefined,
 	rowId: string,
 	href: string,
 	clientId: string | null
 ): string =>
-	appId === 'salem' || rowId === 'finny-documents' ? withClient(href, clientId) : href;
+	appId === 'salem' || FINNY_QUERY_ROWS.includes(rowId) ? withClient(href, clientId) : href;
 
 /**
  * `embed` and `client` belong to the shell: the frame always gets `embed=1`
@@ -95,7 +98,7 @@ export const rescopeUrl = (pathname: string, clientId: string | null): string | 
 	if (pathname === '/x/salem' || pathname.startsWith('/x/salem/')) {
 		return withClient(pathname, clientId);
 	}
-	if (pathname === '/x/finny/documents') {
+	if (pathname === '/x/finny/documents' || pathname === '/x/finny' || pathname === '/x/finny/') {
 		return withClient(pathname, clientId);
 	}
 	if (pathname.startsWith('/x/finny/clients/')) {

@@ -61,6 +61,21 @@ describe('runningJob', () => {
 		expect(runningJob(snap, 'deep_sync', '2')).toBeUndefined();
 	});
 
+	it('matches a profile fill on its client, under either param name', () => {
+		// The server row carries `client`; the optimistic row startJob adds
+		// before the first poll carries `clientId`.
+		const snap = {
+			...api.EMPTY_SNAPSHOT,
+			running: [
+				job({ id: 'a', kind: 'profile_fill', params: { client: '1' } }),
+				job({ id: 'b', kind: 'profile_fill', params: { clientId: '2' } })
+			]
+		};
+		expect(runningJob(snap, 'profile_fill', '1')?.id).toBe('a');
+		expect(runningJob(snap, 'profile_fill', '2')?.id).toBe('b');
+		expect(runningJob(snap, 'profile_fill', '3')).toBeUndefined();
+	});
+
 	it('counts a queued job as running', () => {
 		// It has not started, but it IS going to. Showing nothing until the
 		// worker picks it up is the "did my click work?" gap all over again.

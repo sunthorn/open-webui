@@ -16,12 +16,24 @@
 	 * this page can read the frame's location to keep the address bar honest.
 	 *
 	 * `embed=1` tells the app to leave its own chrome out.
+	 *
+	 * finny may also ask this page to start a `profile_fill` job over
+	 * postMessage — it holds no axi token, this page does
+	 * (shared-contracts/shell-messages-spec.md).
 	 */
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import { APPS } from '$lib/apps/menu';
 	import { frameSrcFor, shellUrlFor } from '$lib/apps/clientTarget';
+	import { get } from 'svelte/store';
+	import { syncJobs, syncJobsError, startJob } from '$lib/stores/syncJobs';
+	import {
+		finishedMessage,
+		parseFrameRequest,
+		startedMessage,
+		type FrameJobKind
+	} from '$lib/apps/frameJobs';
 
 	let frame: HTMLIFrameElement;
 	let loading = true;
@@ -76,10 +88,53 @@
 		}
 	};
 
+	/** Jobs this frame asked for and has not yet been told the outcome of. */
+	let tracked: { jobId: string; kind: FrameJobKind }[] = [];
+	const post = (msg: unknown) => frame?.contentWindow?.postMessage(msg, location.origin);
+
+	// Only finny, only this frame, only this origin: anything else is not a
+	// request and gets no reply. The checks are the contract, not a security
+	// boundary — a same-origin frame could read this page's storage outright.
+	const onMessage = async (e: MessageEvent) => {
+		if (appId !== 'finny') return;
+		if (e.origin !== location.origin || !frame || e.source !== frame.contentWindow) return;
+		const req = parseFrameRequest(e.data);
+		if (!req) return;
+		const job = await startJob(localStorage.getItem('token') ?? '', req.kind, {
+			clientId: req.clientId
+		});
+		post(startedMessage(req.requestId, job, get(syncJobsError)));
+		// Two requests for one client adopt one job: track it once, so the
+		// frame hears at most one job-finished per jobId.
+		if (job && !tracked.some((t) => t.jobId === job.id)) {
+			tracked = [...tracked, { jobId: job.id, kind: req.kind }];
+		}
+		settle();
+	};
+
+	const settle = () => {
+		if (!tracked.length) return;
+		const snap = get(syncJobs);
+		for (const t of tracked) {
+			const msg = finishedMessage(snap, t.jobId, t.kind);
+			if (msg) {
+				post(msg);
+				tracked = tracked.filter((x) => x.jobId !== t.jobId);
+			}
+		}
+	};
+
+	let unsubscribe: (() => void) | undefined;
 	onMount(() => {
 		poll = setInterval(syncUrl, 400);
+		window.addEventListener('message', onMessage);
+		unsubscribe = syncJobs.subscribe(settle);
 	});
-	onDestroy(() => clearInterval(poll));
+	onDestroy(() => {
+		clearInterval(poll);
+		if (typeof window !== 'undefined') window.removeEventListener('message', onMessage);
+		unsubscribe?.();
+	});
 </script>
 
 <svelte:head>
