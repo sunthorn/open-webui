@@ -36,6 +36,7 @@
 		emailOf,
 		errorOf,
 		isStuckDrafting,
+		jobRefusal,
 		pickNeedsAgain,
 		runningFor,
 		sendModeOf,
@@ -55,6 +56,9 @@
 	// compares the active client against (set before the fetch, so a failed
 	// load does not retry in a loop).
 	let requestedFor: string | null = null;
+	// Bumped on every open(): an await that resumes under a newer generation
+	// belongs to a client no longer on screen and must not write anything.
+	let openGen = 0;
 	// Send modal
 	let sendFor: OnboardingAction | null = null;
 	let sendMode: SendMode = 'send';
@@ -67,14 +71,14 @@
 	const token = () => localStorage.getItem('token') ?? '';
 
 	/** Read `id`'s rows. Dropped if the planner switched client meanwhile. */
-	const load = async (id: string) => {
+	const load = async (id: string, gen: number = openGen) => {
 		try {
 			const next = await getOnboarding(token(), id);
-			if (requestedFor !== id) return;
+			if (gen !== openGen) return;
 			state = next;
 			error = '';
 		} catch (e) {
-			if (requestedFor !== id) return;
+			if (gen !== openGen) return;
 			error = actionMessage(e);
 		}
 		loading = false;
@@ -82,45 +86,58 @@
 
 	/** Show `id` from scratch: rows, then draft every pending row that has a template. */
 	const open = async (id: string | null) => {
+		const gen = ++openGen;
 		requestedFor = id;
 		state = null;
 		sendFor = null;
+		sending = false;
+		picking = false;
 		error = '';
 		if (!id) {
 			loading = false;
 			return;
 		}
 		loading = true;
-		await load(id);
+		// Jobs before rows: a draft already in flight must read "Working…",
+		// not "stuck" with a Try again.
+		await refreshJobs(token());
+		if (gen !== openGen) return;
+		await load(id, gen);
+		void startJobPolling(token());
 		// Sequential: the worker runs one job at a time anyway, and three
 		// clicks' worth of 409s is not a better first impression.
 		for (const step of autoDraftSteps(state)) {
-			if (requestedFor !== id) return;
+			if (gen !== openGen) return;
 			await run(step, 'onb_draft');
 		}
 	};
 
-	const run = async (step: Step, kind: OnboardingJobKind, args: Record<string, unknown> = {}) => {
+	/** Queue a job. False when the page moved to another client meanwhile. */
+	const run = async (
+		step: Step,
+		kind: OnboardingJobKind,
+		args: Record<string, unknown> = {}
+	): Promise<boolean> => {
+		const gen = openGen;
 		const id = state?.lead.xplanClientId;
-		if (!id) return;
+		if (!id) return false;
 		try {
 			await runAction(token(), id, step, kind, args);
-			error = '';
+			if (gen === openGen) error = '';
 		} catch (e) {
-			error = actionMessage(e);
+			if (gen === openGen) error = actionMessage(e);
 		}
+		if (gen !== openGen) return false;
 		// Jobs first: a row reloaded as `drafting` against a snapshot without
 		// its job would flash "Try again".
 		await refreshJobs(token());
-		await load(id);
+		await load(id, gen);
 		void startJobPolling(token());
+		return gen === openGen;
 	};
 
 	onMount(() => {
 		mounted = true;
-		// One poll at least (it stops itself when nothing runs): "Try again"
-		// waits for it — see jobsLoaded.
-		void startJobPolling(token());
 	});
 
 	// Reload whenever the active client is not the one on screen (B2).
@@ -132,7 +149,9 @@
 	$: jobsLoaded = $syncJobs !== EMPTY_SNAPSHOT;
 
 	// Re-read the rows whenever one of THIS client's onboarding jobs leaves
-	// the running list — that is the moment a chip changes.
+	// the running list — that is the moment a chip changes. A job that was
+	// refused (busy, already sent…) leaves the row as it was, so its own
+	// error is the only sign the click did anything: show it.
 	let seen = new Set<string>();
 	$: {
 		const mine = new Set(
@@ -140,24 +159,36 @@
 				.filter((j) => j.kind.startsWith('onb_') && loadedFor && j.params?.client === loadedFor)
 				.map((j) => j.id)
 		);
-		if (loadedFor && [...seen].some((id) => !mine.has(id))) void load(loadedFor);
+		const gone = [...seen].filter((id) => !mine.has(id));
+		if (loadedFor && gone.length) {
+			const refusal = gone.map((id) => jobRefusal($syncJobs, id)).find((m) => m);
+			const gen = openGen;
+			void load(loadedFor, gen).then(() => {
+				if (refusal && gen === openGen && !rowSays(refusal)) error = refusal;
+			});
+		}
 		seen = mine;
 	}
+
+	/** A failed row already shows its own message; don't repeat it on top. */
+	const rowSays = (text: string) =>
+		(state?.actions ?? []).some((a) => a.status === 'failed' && errorOf(a)?.message === text);
 
 	const stuck = (a: OnboardingAction) =>
 		!!loadedFor && jobsLoaded && isStuckDrafting(a, $syncJobs, loadedFor);
 
 	const tick = async (a: OnboardingAction) => {
+		const gen = openGen;
 		const id = state?.lead.xplanClientId;
-		if (!id) return;
+		if (!id || a.xplanClientId !== id) return;
 		if (a.status === 'drafting' && !stuck(a)) return;
 		try {
 			await setAction(token(), id, a.step, a.status === 'done' ? 'pending' : 'done');
-			error = '';
+			if (gen === openGen) error = '';
 		} catch (e) {
-			error = actionMessage(e);
+			if (gen === openGen) error = actionMessage(e);
 		}
-		await load(id);
+		if (gen === openGen) await load(id, gen);
 	};
 
 	const openSend = (a: OnboardingAction, mode: SendMode) => {
@@ -180,18 +211,24 @@
 			return;
 		}
 		sending = true;
-		await run(sendFor.step, 'onb_send', { again: sendsAgain(sendMode), email: { subject, html } });
+		const current = await run(sendFor.step, 'onb_send', {
+			again: sendsAgain(sendMode),
+			email: { subject, html }
+		});
+		// A switch meanwhile already reset the modal for the new client.
+		if (!current) return;
 		sending = false;
 		sendFor = null;
 	};
 
 	const pickSlot = async (a: OnboardingAction, slot: { start: string }) => {
+		if (a.xplanClientId !== state?.lead.xplanClientId) return;
 		picking = true;
-		await run(BOOK_STEP, 'onb_book', {
+		const current = await run(BOOK_STEP, 'onb_book', {
 			slot: { start: slot.start },
 			...(pickNeedsAgain(a) ? { again: true } : {})
 		});
-		picking = false;
+		if (current) picking = false;
 	};
 
 	const continueOn = async () => {
@@ -204,6 +241,9 @@
 			error = actionMessage(e);
 		}
 	};
+
+	const SECOND_INVITE =
+		'This sends a second invite — the first one is not cancelled; remove it from your calendar if you are rescheduling.';
 
 	const sendLabel: Record<SendMode, string> = {
 		send: 'Send',
@@ -320,7 +360,7 @@
 							{/if}
 							{#if a && row.kind === 'booking' && a.status !== 'done' && slotsOf(a).length}
 								{#if pickNeedsAgain(a)}
-									<p class="text-xs text-gray-500 mt-2">Pick a time to send a second invite:</p>
+									<p class="text-xs text-amber-700 dark:text-amber-300 mt-2">{SECOND_INVITE}</p>
 								{/if}
 								<div class="flex flex-wrap gap-2 mt-2">
 									{#each slotsOf(a) as s}
@@ -337,7 +377,7 @@
 						</div>
 						<div class="shrink-0 flex items-center gap-1.5">
 							{#if a && row.kind === 'document'}
-								{#if a.draftUrl && a.status !== 'pending' && a.status !== 'drafting'}
+								{#if a.draftUrl?.startsWith('https:') && a.status !== 'pending' && a.status !== 'drafting'}
 									<a
 										href={a.draftUrl}
 										target="_blank"
@@ -350,7 +390,7 @@
 									<button
 										on:click={() => openSend(a, mode)}
 										disabled={!!job || (mode === 'send' && !canSend(a))}
-										title={!emailOf(a)?.to ? 'No email on file — add it in XPLAN' : ''}
+										title={mode === 'send' && !canSend(a) ? 'No email on file — add it in XPLAN' : ''}
 										class="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 									>
 										{sendLabel[mode]}
@@ -379,7 +419,11 @@
 								<button
 									on:click={() => run(BOOK_STEP, 'onb_book')}
 									disabled={!bookable || !!job || picking}
-									title={bookable ? '' : 'Send the welcome pack, FSG and fact find first'}
+									title={!bookable
+										? 'Send the welcome pack, FSG and fact find first'
+										: pickNeedsAgain(a)
+											? SECOND_INVITE
+											: ''}
 									class="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 								>
 									{slotsOf(a).length
@@ -446,6 +490,9 @@
 					class="mt-1 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-mono"
 				></textarea>
 			</label>
+			<p class="text-xs text-gray-400 mt-1">
+				Only paragraphs, line breaks, bold, italic and lists are kept when sent.
+			</p>
 			<p class="text-xs text-gray-400 mt-2">
 				The attachment is the current file in the client's folder — edits made in Preview are included.
 			</p>

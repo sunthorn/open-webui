@@ -162,6 +162,25 @@ export const actionMessage = (e: unknown): string => {
 	return e instanceof Error ? e.message : String(e);
 };
 
+const BUSY = 'Another send or booking for this step is already running';
+
+/**
+ * Why a finished onboarding job refused, in planner words — or null when it
+ * did not fail. A refusal (busy, already sent/booked, bad slot) fails only
+ * the job and leaves the row untouched, so without this the click looks
+ * like it did nothing. The job carries the message text, not the code.
+ */
+export const jobRefusal = (snap: JobsSnapshot, jobId: string): string | null => {
+	const job = Object.values(snap.last).find((j) => j?.id === jobId);
+	if (!job || job.status !== 'error' || !job.error) return null;
+	const text = job.error.trim();
+	if (/^Another send or booking|^Could not take the send lock/.test(text)) return BUSY;
+	if (/^Already booked/.test(text))
+		return 'Already booked — use Book again to send a second invite';
+	if (/^Already sent/.test(text)) return 'Already sent — use Send again';
+	return text;
+};
+
 /** The onboarding job queued or running for this client and step, if any. */
 export const runningFor = (snap: JobsSnapshot, client: string, step: string): SyncJob | undefined =>
 	snap.running.find(

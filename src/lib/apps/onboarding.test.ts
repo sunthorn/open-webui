@@ -14,7 +14,8 @@ import {
 	sendModeOf,
 	sendsAgain,
 	pickNeedsAgain,
-	actionMessage
+	actionMessage,
+	jobRefusal
 } from './onboarding';
 import { GatewayError } from '$lib/apis/gateway';
 import type { OnboardingAction, OnboardingState } from '$lib/apis/gateway/onboarding';
@@ -187,5 +188,31 @@ describe('Stage 1 page actions', () => {
 		);
 		expect(actionMessage(new Error('boom'))).toBe('boom');
 		expect(actionMessage('x')).toBe('x');
+	});
+});
+
+describe('job-level refusals', () => {
+	const snap = (last: Record<string, unknown>) => ({ ...EMPTY_SNAPSHOT, last }) as never;
+	const job = (id: string, status: string, error: string | null) => ({ id, kind: 'onb_send', status, error });
+
+	it('finds a finished job by id and returns its error in planner words', () => {
+		const s = snap({
+			onb_send: job('j1', 'error', 'Another send or booking for this step is in progress'),
+			onb_book: job('j2', 'error', 'Already booked'),
+			onb_draft: job('j3', 'done', null)
+		});
+		expect(jobRefusal(s, 'j1')).toBe('Another send or booking for this step is already running');
+		expect(jobRefusal(s, 'j2')).toMatch(/already booked/i);
+		expect(jobRefusal(s, 'j3')).toBeNull();
+		expect(jobRefusal(s, 'nope')).toBeNull();
+	});
+
+	it('maps the lock failure to busy and passes other text through', () => {
+		const s = snap({
+			onb_send: job('j1', 'error', 'Could not take the send lock — try again in a moment'),
+			onb_book: job('j2', 'error', 'That slot is no longer offered — pick again')
+		});
+		expect(jobRefusal(s, 'j1')).toBe('Another send or booking for this step is already running');
+		expect(jobRefusal(s, 'j2')).toBe('That slot is no longer offered — pick again');
 	});
 });
