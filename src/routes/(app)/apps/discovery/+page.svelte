@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { DOCUMENTS_APP_NAME, MEETINGS_APP_NAME } from '$lib/apps/brand';
 	// Stage 2 · Discovery Meeting — understand the client.
 	//
 	// One button: "Analyse what we have" runs onb_analyse (contact-layer), which
@@ -342,7 +343,7 @@
 						{/if}
 					{:else}
 						<p class="font-medium">Nothing analysed yet</p>
-						<p class="text-gray-500 text-xs mt-0.5">Reads XPLAN, finny documents, salem meetings, notes and emails for this client.</p>
+						<p class="text-gray-500 text-xs mt-0.5">Reads XPLAN, {DOCUMENTS_APP_NAME} and {MEETINGS_APP_NAME} (meetings, notes and emails) for this client.</p>
 					{/if}
 					{#if outcome}
 						<p class="text-xs mt-1 {outcome.kind === 'error' ? 'text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-300'}">

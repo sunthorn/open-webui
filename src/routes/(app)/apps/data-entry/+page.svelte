@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { DOCUMENTS_APP_NAME } from '$lib/apps/brand';
 	// Stage 3 · Data Entry & Research — four action rows (spec §5.4).
 	//
 	// `update_xplan` holds the Phase A wizard: Upload → Review → Write (stub).
@@ -245,7 +246,7 @@
 			// is uploaded and read on its own, and finny's own reason for a
 			// refusal is shown as finny gave it, after the file's name.
 			for (const f of todo) {
-				busyMsg = `Uploading ${f.name} to finny…`;
+				busyMsg = `Uploading ${f.name} to ${DOCUMENTS_APP_NAME}…`;
 				try {
 					const doc = await uploadClientDocument(token(), id, f);
 					if (gen !== openGen) return;
@@ -428,7 +429,7 @@
 												<input type="file" multiple accept={ACCEPTED_TYPES.join(',')} class="hidden" on:change={onPick} />
 											</label>
 										</p>
-										<p class="text-xs text-gray-400 mt-2">PDF, DOC/DOCX, XLSX, PNG, JPG — up to 25 MB each. They are stored as this client's documents in finny.</p>
+										<p class="text-xs text-gray-400 mt-2">PDF, DOC/DOCX, XLSX, PNG, JPG — up to 25 MB each. They are stored with this client's documents in {DOCUMENTS_APP_NAME}.</p>
 									</div>
 
 									<div class="flex items-center justify-between">
@@ -439,13 +440,13 @@
 									{#if pickerOpen}
 										<div class="rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
 											<div class="px-4 py-2.5 bg-gray-50 dark:bg-gray-850 text-xs font-semibold uppercase tracking-wide text-gray-500 flex justify-between">
-												<span>Documents in finny</span>
+												<span>Client documents</span>
 												<button type="button" on:click={() => (pickerOpen = false)} class="normal-case font-normal">Close</button>
 											</div>
 											{#if pickerLoading}
 												<p class="px-4 py-3 text-sm text-gray-500">Loading…</p>
 											{:else if !pickerDocs.length}
-												<p class="px-4 py-3 text-sm text-gray-500">This client has no documents in finny yet.</p>
+												<p class="px-4 py-3 text-sm text-gray-500">This client has no documents yet.</p>
 											{:else}
 												<ul class="divide-y divide-gray-100 dark:divide-gray-800">
 													{#each pickerDocs as d (d.id)}
@@ -466,7 +467,7 @@
 										<ul class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800 overflow-hidden">
 											{#each uploadedList as [key, d] (key)}
 												<li class="flex items-center justify-between px-4 py-3 text-sm">
-													<span class="truncate">{d.currentVersion?.fileName ?? d.title} <span class="text-gray-400">· in finny</span></span>
+													<span class="truncate">{d.currentVersion?.fileName ?? d.title} <span class="text-gray-400">· in {DOCUMENTS_APP_NAME}</span></span>
 													<button on:click={() => forgetUploaded(key)} disabled={busy} class="text-gray-400 hover:text-red-500 text-xs">Leave out</button>
 												</li>
 											{/each}
@@ -572,7 +573,7 @@
 			<button on:click={() => goto('/apps/discovery')} class="text-sm text-gray-500 hover:text-black dark:hover:text-white">← Discovery</button>
 		</div>
 		<p class="text-xs text-gray-400 mt-8">
-			Phase A — extract &amp; propose only. The agent never writes to XPLAN here; it reads this client's documents in finny and proposes values for your approval.
+			Phase A — extract &amp; propose only. The agent never writes to XPLAN here; it reads this client's documents in {DOCUMENTS_APP_NAME} and proposes values for your approval.
 		</p>
 	{/if}
 </div>

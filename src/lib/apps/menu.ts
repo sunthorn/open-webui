@@ -1,3 +1,4 @@
+import { DOCUMENTS_APP_NAME, MEETINGS_APP_NAME } from './brand';
 /**
  * The axi rail, as data.
  *
@@ -161,7 +162,7 @@ export const APPS: AppDef[] = [
 	{
 		id: 'salem',
 		// Named for what it does, not for the product it came from.
-		label: 'Meetings',
+		label: MEETINGS_APP_NAME,
 		icon: ICON.mic,
 		href: '/x/salem/meetings',
 		root: [
@@ -247,7 +248,7 @@ export const APPS: AppDef[] = [
 	},
 	{
 		id: 'finny',
-		label: 'Documents',
+		label: DOCUMENTS_APP_NAME,
 		// A document, not a person. The users glyph was left over from when this
 		// tab was called finny and led with its client list.
 		icon: ICON.doc,

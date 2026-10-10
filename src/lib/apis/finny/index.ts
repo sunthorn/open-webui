@@ -1,3 +1,4 @@
+import { DOCUMENTS_APP_NAME } from '$lib/apps/brand';
 // open-webui/src/lib/apis/finny/index.ts
 // finny's documents, reached from the shell.
 //
@@ -60,7 +61,7 @@ export const ensureFinnySession = async (token: string): Promise<void> => {
 		credentials: 'include',
 		headers: { Authorization: `Bearer ${token}` }
 	});
-	if (!res.ok) throw await finnyError(res, 'Could not open a finny session');
+	if (!res.ok) throw await finnyError(res, `Could not open a ${DOCUMENTS_APP_NAME} session`);
 };
 
 const finnyFetch = async (token: string, path: string, init: RequestInit = {}, retry = true): Promise<Response> => {
@@ -146,7 +147,7 @@ export const waitForDocumentText = async (
 			throw new Error(`finny could not extract text from "${filename}": ${t.errorMessage ?? 'unknown error'}`);
 		}
 		if (now() - started >= timeoutMs) {
-			throw new Error(`Timed out waiting for finny to index "${filename}" — try again in a minute.`);
+			throw new Error(`Timed out waiting for "${filename}" to be indexed — try again in a minute.`);
 		}
 		await wait(intervalMs);
 	}

@@ -146,7 +146,7 @@ describe('getDocumentText / waitForDocumentText', () => {
 				intervalMs: 100,
 				timeoutMs: 250
 			})
-		).rejects.toThrow('Timed out waiting for finny to index "big.pdf"');
+		).rejects.toThrow('Timed out waiting for "big.pdf" to be indexed');
 	});
 
 	it('treats indexed-but-empty as no text', async () => {
