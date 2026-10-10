@@ -6,6 +6,7 @@ import type { JobsSnapshot, SyncJob } from '$lib/apis/gateway/jobs';
 import type {
 	ActionStatus,
 	OnboardingAction,
+	OnboardingContact,
 	OnboardingState,
 	Stage,
 	Step
@@ -133,7 +134,20 @@ export const slotsOf = (a: OnboardingAction) =>
 export const slotOf = (a: OnboardingAction) =>
 	(a.detail?.slot as { start: string; end: string; label: string } | undefined) ?? null;
 
-export const canSend = (a: OnboardingAction): boolean => a.status === 'ready' && !!emailOf(a)?.to;
+/**
+ * Who Send mails: the address the draft recorded, else the client's current
+ * email from the last XPLAN sync (onb_send works it out again at send time,
+ * so an email added after drafting needs no Regenerate).
+ */
+export const recipientOf = (a: OnboardingAction, contact?: OnboardingContact | null): string | null =>
+	emailOf(a)?.to || contact?.email || null;
+
+export const canSend = (a: OnboardingAction, contact?: OnboardingContact | null): boolean =>
+	a.status === 'ready' && !!recipientOf(a, contact);
+
+/** Why Send is off on a ready row: no address on the draft or the XPLAN record. */
+export const NO_EMAIL_HINT =
+	'No email on file. Add a Home or Work Email in XPLAN, then click Re-read from XPLAN on the client page.';
 
 /**
  * Which Send a document row offers (onboarding-stages.md §4 send gate):

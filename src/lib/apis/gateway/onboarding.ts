@@ -100,6 +100,15 @@ export interface OnboardingState {
 	templates?: Record<string, boolean>;
 	/** Pending rows with more than one template: never auto-drafted; the planner picks. */
 	pickTemplate?: Record<string, boolean>;
+	/** The client's contact details from the last XPLAN sync; null when unreadable, absent on an older gateway. */
+	contact?: OnboardingContact | null;
+}
+
+/** Mirrors OnboardingContact in shared-contracts/types/onboarding.ts — keep in sync. */
+export interface OnboardingContact {
+	email: string | null;
+	emails: string[];
+	phone: string | null;
 }
 
 /** One finny template a document row can be drafted from. */

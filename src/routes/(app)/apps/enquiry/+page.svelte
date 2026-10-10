@@ -34,6 +34,8 @@
 		canBook,
 		canContinue,
 		canSend,
+		recipientOf,
+		NO_EMAIL_HINT,
 		doneCount,
 		emailOf,
 		errorOf,
@@ -240,9 +242,16 @@
 		if (gen === openGen) await load(id, gen);
 	};
 
+	// The address the open Send goes to: the draft's, else the client's
+	// current one; the planner may pick another address on the record.
+	let sendTo = '';
+	$: contact = state?.contact ?? null;
+	$: recipients = [...new Set([...(contact?.emails ?? []), ...(sendFor && recipientOf(sendFor, contact) ? [recipientOf(sendFor, contact)!] : [])])];
+
 	const openSend = (a: OnboardingAction, mode: SendMode) => {
 		sendFor = a;
 		sendMode = mode;
+		sendTo = recipientOf(a, state?.contact) ?? '';
 		subject = emailOf(a)?.subject ?? '';
 		html = emailOf(a)?.html ?? '';
 	};
@@ -262,7 +271,10 @@
 		sending = true;
 		const current = await run(sendFor.step, 'onb_send', {
 			again: sendsAgain(sendMode),
-			email: { subject, html }
+			email: { subject, html },
+			// Only an address on the client's record is sent as a pick; the
+			// gateway refuses anything else.
+			...(sendTo && contact?.emails.includes(sendTo) ? { to: sendTo } : {})
 		});
 		// A switch meanwhile already reset the modal for the new client.
 		if (!current) return;
@@ -341,6 +353,41 @@
 			/>
 		</div>
 
+		<section
+			aria-label="Client contact details"
+			class="mb-6 rounded-2xl border border-gray-100 dark:border-gray-850 px-4 py-3 flex flex-wrap items-start justify-between gap-3"
+		>
+			<div class="min-w-0">
+				<p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Contact · from XPLAN</p>
+				{#if contact === null}
+					<p class="text-sm text-gray-500 mt-1">Contact details could not be read from the client store.</p>
+				{:else}
+					{#if contact.emails.length}
+						<ul class="mt-1 text-sm">
+							{#each contact.emails as addr}
+								<li class="flex flex-wrap items-center gap-2">
+									<span class="font-medium break-all">{addr}</span>
+									{#if addr === contact.email}
+										<span class="text-xs text-gray-500">documents are sent here</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+					{:else}
+						<p class="text-sm text-amber-700 dark:text-amber-300 mt-1">{NO_EMAIL_HINT}</p>
+					{/if}
+					{#if contact.phone}
+						<p class="text-sm text-gray-500 mt-1">Phone {contact.phone}</p>
+					{/if}
+				{/if}
+			</div>
+			<XplanLink
+				path={`/factfind/view/${loadedFor}?role=client&page=client_contact`}
+				label="Contact Details"
+				title="Open this client's Contact Details in XPLAN"
+			/>
+		</section>
+
 		{#if error}
 			<p class="text-sm text-red-600 dark:text-red-400 mb-3">{error}</p>
 		{/if}
@@ -405,6 +452,9 @@
 							{#if a && row.kind === 'document' && a.status !== 'pending' && a.status !== 'drafting' && templateOf(a)}
 								<p class="text-xs text-gray-400 mt-1">From template: {templateOf(a)}</p>
 							{/if}
+							{#if a && row.kind === 'document' && a.status === 'ready' && !recipientOf(a, contact)}
+								<p class="text-xs text-amber-700 dark:text-amber-300 mt-1">{NO_EMAIL_HINT}</p>
+							{/if}
 							{#if a && row.kind === 'document' && (a.status === 'sent' || a.status === 'done') && emailOf(a)?.to}
 								<p class="text-xs text-gray-400 mt-1">Sent to {emailOf(a)?.to}</p>
 							{/if}
@@ -442,8 +492,8 @@
 								{#if mode}
 									<button
 										on:click={() => openSend(a, mode)}
-										disabled={!!job || (mode === 'send' && !canSend(a))}
-										title={mode === 'send' && !canSend(a) ? 'No email on file — add it in XPLAN' : ''}
+										disabled={!!job || (mode === 'send' && !canSend(a, contact))}
+										title={mode === 'send' && !canSend(a, contact) ? NO_EMAIL_HINT : ''}
 										class="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 									>
 										{sendLabel[mode]}
@@ -518,10 +568,25 @@
 			<p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">
 				{sendsAgain(sendMode) ? 'Send again from your mailbox' : 'Send from your mailbox'}
 			</p>
-			<p class="text-sm mt-1">
-				To <span class="font-medium">{emailOf(sendFor)?.to ?? '(no email on file)'}</span> · attaching
+			<div class="text-sm mt-1 flex flex-wrap items-center gap-1">
+				<span>To</span>
+				{#if recipients.length > 1}
+					<label for="send-to" class="sr-only">Send to</label>
+					<select
+						id="send-to"
+						bind:value={sendTo}
+						class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm font-medium"
+					>
+						{#each recipients as addr}
+							<option value={addr}>{addr}</option>
+						{/each}
+					</select>
+				{:else}
+					<span class="font-medium">{sendTo || '(no email on file)'}</span>
+				{/if}
+				<span>· attaching</span>
 				<span class="font-medium">{String(sendFor.detail?.draft_name ?? '')}</span>
-			</p>
+			</div>
 			{#if sendMode === 'unrecorded'}
 				<p class="text-xs text-amber-700 dark:text-amber-300 mt-2">
 					The last send may have gone out. Check your Sent Items first — this sends another copy.
@@ -558,7 +623,7 @@
 				>
 				<button
 					on:click={confirmSend}
-					disabled={sending || !subject.trim() || !html.trim()}
+					disabled={sending || !sendTo || !subject.trim() || !html.trim()}
 					class="text-sm px-4 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 					>{sending ? 'Sending…' : sendLabel[sendMode]}</button
 				>

@@ -6,6 +6,8 @@ import {
 	canBook,
 	canContinue,
 	canSend,
+	recipientOf,
+	NO_EMAIL_HINT,
 	doneCount,
 	errorOf,
 	isStuckDrafting,
@@ -266,5 +268,29 @@ describe('job-level refusals', () => {
 		});
 		expect(jobRefusal(s, 'j1')).toBe('Another send or booking for this step is already running');
 		expect(jobRefusal(s, 'j2')).toBe('That slot is no longer offered — pick again');
+	});
+});
+
+describe('NO_EMAIL_HINT', () => {
+	it('tells the planner where to add the email and what to do after', () => {
+		expect(NO_EMAIL_HINT).toMatch(/XPLAN/);
+		expect(NO_EMAIL_HINT).toMatch(/Re-read from XPLAN/);
+	});
+});
+
+describe('recipientOf / canSend with the client contact', () => {
+	const ready = { step: 'enquiry.fsg', status: 'ready', detail: { email: { to: null } } } as never;
+	const contact = { email: 'john@example.com', emails: ['john@example.com'], phone: null };
+	it('falls back to the client email from XPLAN when the draft has none', () => {
+		expect(recipientOf(ready, contact)).toBe('john@example.com');
+		expect(canSend(ready, contact)).toBe(true);
+	});
+	it('stays off with no address anywhere', () => {
+		expect(canSend(ready, { email: null, emails: [], phone: null })).toBe(false);
+		expect(canSend(ready, null)).toBe(false);
+	});
+	it('keeps the draft recipient first', () => {
+		const drafted = { step: 'enquiry.fsg', status: 'ready', detail: { email: { to: 'a@x.com' } } } as never;
+		expect(recipientOf(drafted, contact)).toBe('a@x.com');
 	});
 });
