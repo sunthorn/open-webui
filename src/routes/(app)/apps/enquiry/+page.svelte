@@ -299,8 +299,9 @@
 			<div
 				class="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200 mb-3"
 			>
-				Connect a drive in Salem to draft documents — Salem › Connections, pick a drive, then assign this
-				client a folder.
+				Connect a drive to draft documents — in
+				<a href="/x/salem/connectors" class="font-medium underline">Meetings › Connections</a>, connect a
+				drive, then assign this client a folder.
 			</div>
 		{/if}
 
@@ -400,7 +401,7 @@
 									<button
 										on:click={() => run(a.step, 'onb_draft')}
 										disabled={!!job || noDrive}
-										title={noDrive ? 'Connect a drive in Salem to draft documents' : ''}
+										title={noDrive ? 'Connect a drive in Meetings › Connections to draft documents' : ''}
 										class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-40 transition"
 									>
 										{a.status === 'pending' ? 'Draft' : 'Try again'}
@@ -409,7 +410,7 @@
 									<button
 										on:click={() => run(a.step, 'onb_draft')}
 										disabled={!!job || noDrive}
-										title={noDrive ? 'Connect a drive in Salem to draft documents' : ''}
+										title={noDrive ? 'Connect a drive in Meetings › Connections to draft documents' : ''}
 										class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-40 transition"
 									>
 										Regenerate
