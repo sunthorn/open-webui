@@ -480,7 +480,7 @@
 						</div>
 						<div class="shrink-0 flex items-center gap-1.5">
 							{#if a && row.kind === 'document'}
-								{#if a.draftUrl?.startsWith('https:') && a.status !== 'pending' && a.status !== 'drafting'}
+								{#if a.draftUrl?.startsWith('https:') && a.status !== 'drafting'}
 									<a
 										href={a.draftUrl}
 										target="_blank"
