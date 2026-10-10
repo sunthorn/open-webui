@@ -98,6 +98,23 @@ export interface OnboardingState {
 	 * older gateway — read that as "unknown", never as "all present".
 	 */
 	templates?: Record<string, boolean>;
+	/** Pending rows with more than one template: never auto-drafted; the planner picks. */
+	pickTemplate?: Record<string, boolean>;
+}
+
+/** One finny template a document row can be drafted from. */
+export interface TemplateOption {
+	id: string;
+	name: string;
+	/** "client": made for this client; "firm": firm-wide. */
+	scope: 'client' | 'firm';
+}
+
+/** `GET /gw/onboarding/{client}/actions/{step}/templates` */
+export interface TemplateChoices {
+	templates: TemplateOption[];
+	/** What a draft without `template_id` fills; null when none is published. */
+	selected: string | null;
 }
 
 export type OnboardingJobKind = 'onb_draft' | 'onb_send' | 'onb_book' | 'onb_analyse';
@@ -171,6 +188,17 @@ export const runAction = async (
 		headers: auth(token),
 		body: JSON.stringify({ kind, args })
 	});
+	if (!res.ok) throw await gatewayError(res);
+	return await res.json();
+};
+
+/** The published templates a document row can be drafted from, and the one a draft would pick. */
+export const getTemplateChoices = async (
+	token: string,
+	client: string,
+	step: Step
+): Promise<TemplateChoices> => {
+	const res = await fetch(`${base(client)}/actions/${step}/templates`, { headers: auth(token) });
 	if (!res.ok) throw await gatewayError(res);
 	return await res.json();
 };

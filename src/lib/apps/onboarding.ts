@@ -112,7 +112,9 @@ export const autoDraftSteps = (state: OnboardingState | null): Step[] => {
 				!a.draftRef &&
 				!a.emailRef &&
 				DOCUMENT_STEPS.includes(a.step) &&
-				templates[a.step] === true
+				templates[a.step] === true &&
+				// More than one to choose from: the planner picks, not the page.
+				!state.pickTemplate?.[a.step]
 		)
 		.map((a) => a.step);
 };

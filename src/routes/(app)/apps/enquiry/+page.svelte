@@ -13,13 +13,15 @@
 	import { activeClient, linkableClientId } from '$lib/apps/activeClient';
 	import {
 		getOnboarding,
+		getTemplateChoices,
 		runAction,
 		setAction,
 		setStage,
 		type OnboardingAction,
 		type OnboardingJobKind,
 		type OnboardingState,
-		type Step
+		type Step,
+		type TemplateOption
 	} from '$lib/apis/gateway/onboarding';
 	import { EMPTY_SNAPSHOT } from '$lib/apis/gateway/jobs';
 	import {
@@ -67,6 +69,12 @@
 	let sending = false;
 	// A slot pick in flight
 	let picking = false;
+	// Template picker: the row asking, its choices, the one ticked. `choosing`
+	// is the row whose list is being fetched.
+	let pickFor: Step | null = null;
+	let pickOptions: TemplateOption[] = [];
+	let pickChosen = '';
+	let choosing: Step | null = null;
 
 	const token = () => localStorage.getItem('token') ?? '';
 
@@ -92,6 +100,8 @@
 		sendFor = null;
 		sending = false;
 		picking = false;
+		pickFor = null;
+		choosing = null;
 		error = '';
 		if (!id) {
 			loading = false;
@@ -135,6 +145,45 @@
 		void startJobPolling(token());
 		return gen === openGen;
 	};
+
+	/**
+	 * Draft or Regenerate. With more than one template, ask which (the row's
+	 * last one ticked); with one, draft from it; with none, the job's
+	 * no_template message says where to add one.
+	 */
+	const startDraft = async (step: Step) => {
+		const gen = openGen;
+		const id = state?.lead.xplanClientId;
+		if (!id) return;
+		choosing = step;
+		try {
+			const choices = await getTemplateChoices(token(), id, step);
+			if (gen !== openGen) return;
+			choosing = null;
+			if (choices.templates.length > 1) {
+				pickOptions = choices.templates;
+				pickChosen = choices.selected ?? choices.templates[0].id;
+				pickFor = step;
+				return;
+			}
+			await run(step, 'onb_draft', choices.selected ? { template_id: choices.selected } : {});
+		} catch (e) {
+			if (gen !== openGen) return;
+			choosing = null;
+			error = actionMessage(e);
+		}
+	};
+
+	const confirmPick = async () => {
+		if (!pickFor || !pickChosen) return;
+		const step = pickFor;
+		const template_id = pickChosen;
+		pickFor = null;
+		await run(step, 'onb_draft', { template_id });
+	};
+
+	const templateOf = (a: OnboardingAction) =>
+		((a.detail?.template as { name?: string } | undefined)?.name ?? '') || null;
 
 	onMount(() => {
 		mounted = true;
@@ -353,6 +402,9 @@
 							{#if isStuck}
 								<p class="text-xs text-gray-500 mt-1">The draft stopped before it finished.</p>
 							{/if}
+							{#if a && row.kind === 'document' && a.status !== 'pending' && a.status !== 'drafting' && templateOf(a)}
+								<p class="text-xs text-gray-400 mt-1">From template: {templateOf(a)}</p>
+							{/if}
 							{#if a && row.kind === 'document' && (a.status === 'sent' || a.status === 'done') && emailOf(a)?.to}
 								<p class="text-xs text-gray-400 mt-1">Sent to {emailOf(a)?.to}</p>
 							{/if}
@@ -399,8 +451,8 @@
 								{/if}
 								{#if a.status === 'pending' || (a.status === 'failed' && !a.draftRef) || isStuck}
 									<button
-										on:click={() => run(a.step, 'onb_draft')}
-										disabled={!!job || noDrive}
+										on:click={() => startDraft(a.step)}
+										disabled={!!job || noDrive || choosing === a.step}
 										title={noDrive ? 'Connect a drive in Meetings › Connections to draft documents' : ''}
 										class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-40 transition"
 									>
@@ -408,8 +460,8 @@
 									</button>
 								{:else if a.status === 'ready' || a.status === 'sent' || a.status === 'failed'}
 									<button
-										on:click={() => run(a.step, 'onb_draft')}
-										disabled={!!job || noDrive}
+										on:click={() => startDraft(a.step)}
+										disabled={!!job || noDrive || choosing === a.step}
 										title={noDrive ? 'Connect a drive in Meetings › Connections to draft documents' : ''}
 										class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-40 transition"
 									>
@@ -509,6 +561,45 @@
 					disabled={sending || !subject.trim() || !html.trim()}
 					class="text-sm px-4 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 					>{sending ? 'Sending…' : sendLabel[sendMode]}</button
+				>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if pickFor}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+		<div class="w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 shadow-xl p-5">
+			<p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Choose a template</p>
+			<p class="text-sm mt-1">
+				{ENQUIRY_ROWS.find((r) => r.step === pickFor)?.title ?? ''} has more than one published template.
+			</p>
+			<div class="mt-3 flex flex-col gap-1.5 max-h-72 overflow-y-auto">
+				{#each pickOptions as t (t.id)}
+					<label
+						class="flex items-center gap-2.5 rounded-xl border px-3 py-2 text-sm cursor-pointer transition {pickChosen === t.id
+							? 'border-black dark:border-white'
+							: 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850'}"
+					>
+						<input type="radio" bind:group={pickChosen} value={t.id} class="accent-black dark:accent-white" />
+						<span class="min-w-0 flex-1 truncate">{t.name}</span>
+						<span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500"
+							>{t.scope === 'client' ? 'This client' : 'Firm'}</span
+						>
+					</label>
+				{/each}
+			</div>
+			<div class="flex justify-end gap-2 mt-4">
+				<button
+					on:click={() => (pickFor = null)}
+					class="text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+					>Cancel</button
+				>
+				<button
+					on:click={confirmPick}
+					disabled={!pickChosen}
+					class="text-sm px-4 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
+					>Draft</button
 				>
 			</div>
 		</div>

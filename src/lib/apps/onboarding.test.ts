@@ -113,6 +113,17 @@ describe('Stage 1 gating', () => {
 		expect(autoDraftSteps(st([a('enquiry.fsg', 'pending')]))).toEqual(['enquiry.fsg']);
 	});
 
+	it('never auto-drafts a row with more than one template to pick from', () => {
+		const st = {
+			lead: { stage: 'enquiry' },
+			actions: [a('enquiry.welcome_pack', 'pending'), a('enquiry.fsg', 'pending')],
+			drive: { connected: true },
+			templates: { 'enquiry.welcome_pack': true, 'enquiry.fsg': true },
+			pickTemplate: { 'enquiry.fsg': true }
+		} as unknown as OnboardingState;
+		expect(autoDraftSteps(st)).toEqual(['enquiry.welcome_pack']);
+	});
+
 	it('Send needs ready and an address', () => {
 		expect(canSend(a('enquiry.fsg', 'ready', { email: { to: 'j@x.y' } }))).toBe(true);
 		expect(canSend(a('enquiry.fsg', 'ready', { email: { to: null } }))).toBe(false);
