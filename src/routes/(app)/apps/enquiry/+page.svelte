@@ -51,6 +51,10 @@
 	} from '$lib/apps/onboarding';
 	import { syncJobs, refreshJobs, startJobPolling } from '$lib/stores/syncJobs';
 	import XplanLink from '$lib/components/xplan/XplanLink.svelte';
+	import Eye from '$lib/components/icons/Eye.svelte';
+	import PaperAirplane from '$lib/components/icons/PaperAirplane.svelte';
+	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
+	import Calendar from '$lib/components/icons/Calendar.svelte';
 
 	let state: OnboardingState | null = null;
 	let loading = true;
@@ -313,6 +317,9 @@
 		unrecorded: 'Send again'
 	};
 
+	const bookLabel = (a: OnboardingAction): string =>
+		slotsOf(a).length ? 'Other times' : pickNeedsAgain(a) ? 'Book again' : 'Book';
+
 	$: actions = state?.actions ?? [];
 	$: map = byStep(actions);
 	$: noDrive = state?.drive.connected === false;
@@ -485,18 +492,21 @@
 										href={a.draftUrl}
 										target="_blank"
 										rel="noopener"
-										class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
-										>Preview</a
+										title="Preview"
+										aria-label="Preview"
+										class="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+										><Eye className="size-4" /></a
 									>
 								{/if}
 								{#if mode}
 									<button
 										on:click={() => openSend(a, mode)}
 										disabled={!!job || (mode === 'send' && !canSend(a, contact))}
-										title={mode === 'send' && !canSend(a, contact) ? NO_EMAIL_HINT : ''}
-										class="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
+										title={mode === 'send' && !canSend(a, contact) ? NO_EMAIL_HINT : sendLabel[mode]}
+										aria-label={sendLabel[mode]}
+										class="p-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 									>
-										{sendLabel[mode]}
+										<PaperAirplane className="size-4" />
 									</button>
 								{/if}
 								{#if a.status === 'pending' || (a.status === 'failed' && !a.draftRef) || isStuck}
@@ -512,10 +522,11 @@
 									<button
 										on:click={() => startDraft(a.step)}
 										disabled={!!job || noDrive || choosing === a.step}
-										title={noDrive ? 'Connect a drive in Meetings › Connections to draft documents' : ''}
-										class="text-xs font-medium px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-40 transition"
+										title={noDrive ? 'Connect a drive in Meetings › Connections to draft documents' : 'Regenerate'}
+										aria-label="Regenerate"
+										class="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-40 transition"
 									>
-										Regenerate
+										<ArrowPath className="size-4" />
 									</button>
 								{/if}
 							{:else if a && row.kind === 'booking' && a.status !== 'done'}
@@ -526,14 +537,11 @@
 										? 'Send the welcome pack, FSG and fact find first'
 										: pickNeedsAgain(a)
 											? SECOND_INVITE
-											: ''}
-									class="text-xs font-medium px-2.5 py-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
+											: bookLabel(a)}
+									aria-label={bookLabel(a)}
+									class="p-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 								>
-									{slotsOf(a).length
-										? 'Other times'
-										: pickNeedsAgain(a)
-											? 'Book again'
-											: 'Book'}
+									<Calendar className="size-4" />
 								</button>
 							{/if}
 						</div>
