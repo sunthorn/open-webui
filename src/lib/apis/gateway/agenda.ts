@@ -1,4 +1,4 @@
-// Agenda aggregator + connector client. Mirrors shared-contracts/api-responses.ts
+// Agenda aggregator + work-account status client. Mirrors shared-contracts/api-responses.ts
 // (Agenda*, ConnectorStatus) — copied, not imported, for the same build-context
 // reason as the other gateway types; must stay in sync.
 import { gatewayUrl, gatewayError } from './index';
@@ -102,21 +102,6 @@ export const getConnectors = async (token: string): Promise<ConnectorsResponse> 
 	return await res.json();
 };
 
-/** Returns the provider consent URL; the caller sets window.location to it. */
-export const authorizeConnector = async (token: string, provider: ConnectorProvider): Promise<string> => {
-	const res = await fetch(`${gatewayUrl()}/gw/connectors/${provider}/authorize`, { headers: auth(token) });
-	if (!res.ok) throw await gatewayError(res);
-	return (await res.json()).url as string;
-};
-
-export const disconnectConnector = async (token: string, provider: ConnectorProvider): Promise<boolean> => {
-	const res = await fetch(`${gatewayUrl()}/gw/connectors/${provider}`, {
-		method: 'DELETE',
-		headers: auth(token)
-	});
-	if (!res.ok) throw await gatewayError(res);
-	return Boolean((await res.json()).disconnected);
-};
 
 // --- writes and pins --------------------------------------------------------
 // Two-step in the UI (the page confirms first), idempotent at the source. The

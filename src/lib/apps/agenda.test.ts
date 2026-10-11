@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	groupTasks, timelineRange, placeEvent, eventsOn, allDayOn, toCalendarEvents,
-	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel, sourceChip
+	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel, sourceChip, sourceChips
 } from './agenda';
 import type { AgendaEvent, AgendaTask, AgendaResponse } from '$lib/apis/gateway/agenda';
 
@@ -250,28 +250,31 @@ describe('clientLabel', () => {
 
 describe('sourceChip', () => {
 	const fmt = () => '14:30';
-	it('a connected provider shows its account and offers disconnect', () => {
+	it('the work account shows its address and links to Connections', () => {
 		const c = sourceChip('google', {}, { m365: { status: 'disconnected' }, google: { status: 'ok', email: 'a@b.c' } }, fmt);
-		expect(c).toMatchObject({ state: 'ok', text: 'a@b.c', action: 'disconnect' });
+		expect(c).toMatchObject({ state: 'ok', text: 'a@b.c', action: 'connections' });
 	});
-	it('no connector row, or a disconnected one, offers connect', () => {
-		expect(sourceChip('m365', {}, null, fmt)).toMatchObject({ state: 'off', text: 'connect', action: 'connect' });
-		expect(sourceChip('m365', {}, { m365: { status: 'disconnected' }, google: { status: 'disconnected' } }, fmt).action).toBe('connect');
+	it('a provider that is not the work account is off, with no action of its own', () => {
+		expect(sourceChip('m365', {}, null, fmt).state).toBe('off');
+		expect(sourceChip('m365', {}, null, fmt).action).toBeUndefined();
+		expect(sourceChip('m365', {}, { m365: { status: 'disconnected' }, google: { status: 'ok' } }, fmt).action).toBeUndefined();
 	});
-	it('a provider needing re-auth, or one the aggregator could not read, asks to reconnect', () => {
+	it('a work account needing re-auth, or one the aggregator could not read, asks to reconnect in Connections', () => {
 		const rows = { m365: { status: 'reauth' as const }, google: { status: 'ok' as const, email: 'a@b.c' } };
-		expect(sourceChip('m365', {}, rows, fmt)).toMatchObject({ state: 'warn', text: 'reconnect', action: 'connect' });
+		expect(sourceChip('m365', {}, rows, fmt)).toMatchObject({ state: 'warn', text: 'reconnect', action: 'connections' });
 		expect(sourceChip('google', { google: { status: 'error', message: 'x' } }, rows, fmt)).toMatchObject({ state: 'warn', text: 'reconnect' });
 	});
-	it('a connected provider missing a send scope asks to reconnect to enable sending', () => {
-		const rows = {
-			m365: { status: 'ok' as const, email: 'a@b.c', missing_scopes: ['Mail.Send', 'Mail.Read'] },
-			google: { status: 'ok' as const, email: 'g@b.c', missing_scopes: [] }
-		};
-		expect(sourceChip('m365', {}, rows, fmt)).toMatchObject({ state: 'warn', text: 'Reconnect to enable sending', action: 'connect' });
-		expect(sourceChip('google', {}, rows, fmt)).toMatchObject({ state: 'ok', text: 'g@b.c', action: 'disconnect' });
-		// An older gateway that omits the field changes nothing.
-		expect(sourceChip('google', {}, { m365: { status: 'disconnected' }, google: { status: 'ok', email: 'g@b.c' } }, fmt).state).toBe('ok');
+	it('a work account missing a send scope asks to reconnect to enable sending', () => {
+		const rows = { m365: { status: 'ok' as const, email: 's@b.c', missing_scopes: ['Mail.Send'] }, google: { status: 'disconnected' as const } };
+		expect(sourceChip('m365', {}, rows, fmt)).toMatchObject({ state: 'warn', text: 'Reconnect to enable sending', action: 'connections' });
+	});
+	it('chips: XPLAN then only the work account; none chosen → one "choose" chip', () => {
+		const one = sourceChips({}, { m365: { status: 'ok', email: 's@b.c' }, google: { status: 'disconnected' } }, fmt);
+		expect(one.map((c) => c.source)).toEqual(['xplan', 'm365']);
+		const none = sourceChips({}, { m365: { status: 'disconnected' }, google: { status: 'disconnected' } }, fmt);
+		expect(none.map((c) => c.source)).toEqual(['xplan', 'work']);
+		expect(none[1]).toMatchObject({ label: 'Work account', action: 'connections' });
+		expect(sourceChips({}, null, fmt).map((c) => c.source)).toEqual(['xplan', 'work']);
 	});
 	it('XPLAN is read, locked or not read yet — never connect', () => {
 		expect(sourceChip('xplan', { xplan: { status: 'ok', readAt: '2026-09-20T04:30:00Z' } }, null, fmt)).toMatchObject({ state: 'ok', text: 'read 14:30' });

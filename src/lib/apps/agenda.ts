@@ -248,13 +248,17 @@ export const clientLabel = (via: ClientVia): string =>
 // when the connectors arrived, and every provider read "connect" forever.
 
 export interface SourceChip {
-	source: AgendaSource;
+	source: AgendaSource | 'work';
 	label: string;
 	color: string;
 	state: 'ok' | 'warn' | 'off';
 	text: string;
-	action?: 'connect' | 'disconnect';
+	/** Open Meetings › Connections, where the work account is chosen and reconnected. */
+	action?: 'connections';
 }
+
+/** Where the planner's one sign-in lives (one-sign-in spec §3.4). */
+export const CONNECTIONS_HREF = '/x/salem/connectors';
 
 export const sourceChip = (
 	s: AgendaSource,
@@ -271,10 +275,26 @@ export const sourceChip = (
 		return { source: s, label, color, state: 'off', text: 'not read yet' };
 	}
 	const c = connectors?.[s as ConnectorProvider];
-	if (!c || c.status === 'disconnected') return { source: s, label, color, state: 'off', text: 'connect', action: 'connect' };
-	if (c.status !== 'ok' || st?.status === 'error') return { source: s, label, color, state: 'warn', text: 'reconnect', action: 'connect' };
-	// Connected, but before Mail.Send existed: sending/booking would refuse
-	// with needs_reconnect, so say so here, where the fix (one click) lives.
-	if (c.missing_scopes?.length) return { source: s, label, color, state: 'warn', text: 'Reconnect to enable sending', action: 'connect' };
-	return { source: s, label, color, state: 'ok', text: c.email ?? 'connected', action: 'disconnect' };
+	// Not the work account: nothing is read from it here.
+	if (!c || c.status === 'disconnected') return { source: s, label, color, state: 'off', text: 'not your work account' };
+	if (c.status !== 'ok' || st?.status === 'error') return { source: s, label, color, state: 'warn', text: 'reconnect', action: 'connections' };
+	// Connected before Mail.Send was asked for: sending/booking would refuse
+	// with needs_reconnect, so say so here.
+	if (c.missing_scopes?.length) return { source: s, label, color, state: 'warn', text: 'Reconnect to enable sending', action: 'connections' };
+	return { source: s, label, color, state: 'ok', text: c.email ?? 'connected', action: 'connections' };
+};
+
+/** XPLAN, then the work account's provider only. With no work account, one
+ *  chip that sends the planner to choose it — never a provider of its own. */
+export const sourceChips = (
+	sources: Partial<Record<AgendaSource, AgendaSourceStatus>>,
+	connectors: ConnectorsResponse | null,
+	time: (iso: string) => string
+): SourceChip[] => {
+	const xplan = sourceChip('xplan', sources, connectors, time);
+	const work = (['m365', 'google'] as AgendaSource[])
+		.map((s) => sourceChip(s, sources, connectors, time))
+		.filter((c) => c.state !== 'off');
+	if (work.length) return [xplan, ...work];
+	return [xplan, { source: 'work', label: 'Work account', color: '#9ca3af', state: 'off', text: 'choose in Connections', action: 'connections' }];
 };

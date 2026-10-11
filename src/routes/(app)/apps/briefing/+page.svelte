@@ -7,12 +7,11 @@
 	// inline.
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
-	import { page } from '$app/stores';
 	import { getBriefing, openInXplan, type DailyBriefing } from '$lib/apis/gateway';
 	import {
-		getAgenda, getConnectors, authorizeConnector, disconnectConnector, isoDate,
+		getAgenda, getConnectors, isoDate,
 		completeTask, snoozeTask, moveEvent, putPin, deletePins,
-		type AgendaResponse, type AgendaEvent, type AgendaTask, type ConnectorsResponse, type ConnectorProvider
+		type AgendaResponse, type AgendaEvent, type AgendaTask, type ConnectorsResponse
 	} from '$lib/apis/gateway/agenda';
 	import {
 		fallbackAttention, sourceCalendars, toCalendarEvents,
@@ -36,7 +35,6 @@
 	let loading = true;
 	let loadError = '';
 	let err = '';
-	let busy: ConnectorProvider | null = null;
 	let view: 'today' | 'week' = 'today';
 	let selected: AgendaEvent | null = null;
 	let greeting = 'Hello';
@@ -69,28 +67,6 @@
 			loadError = e?.message ?? 'Could not load your agenda';
 		} finally {
 			loading = false;
-		}
-	};
-
-	const connect = async (p: ConnectorProvider) => {
-		busy = p;
-		try {
-			window.location.href = await authorizeConnector(token(), p);
-		} catch (e: any) {
-			err = e?.message ?? `Could not start ${p} sign-in`;
-			busy = null;
-		}
-	};
-	const disconnect = async (p: ConnectorProvider) => {
-		if (!confirm(`Disconnect ${p === 'm365' ? 'Outlook' : 'Google'}? Your events and tasks from it will disappear from this page.`)) return;
-		busy = p;
-		try {
-			await disconnectConnector(token(), p);
-			await load(true);
-		} catch (e: any) {
-			err = e?.message ?? 'Could not disconnect';
-		} finally {
-			busy = null;
 		}
 	};
 
@@ -166,9 +142,7 @@
 	onMount(() => {
 		const h = new Date().getHours();
 		greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-		const q = get(page).url.searchParams;
-		if (q.get('connector_error')) err = `Connection failed: ${q.get('connector_error')}`;
-		load(Boolean(q.get('connected')));
+		load(false);
 	});
 
 	const compiledLabel = (iso: string) => {
@@ -182,7 +156,7 @@
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">{greeting}</h1>
 			<p class="text-sm text-gray-500 mt-1">{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-			<div class="mt-3"><SourceChips sources={agenda?.sources ?? {}} {connectors} {busy} on:connect={(e) => connect(e.detail)} on:disconnect={(e) => disconnect(e.detail)} /></div>
+			<div class="mt-3"><SourceChips sources={agenda?.sources ?? {}} {connectors} /></div>
 		</div>
 		<!-- Two reads, two costs. Refresh asks Outlook/Google again (the page
 		     otherwise reuses a read for 5 min); Re-read drives the XPLAN browser

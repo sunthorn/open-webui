@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getAgenda, getConnectors, authorizeConnector, disconnectConnector, isoDate, completeTask, snoozeTask, moveEvent, putPin, deletePins } from './agenda';
+import { getAgenda, getConnectors, isoDate, completeTask, snoozeTask, moveEvent, putPin, deletePins } from './agenda';
 import { GatewayError } from './index';
 
 const stub = (status: number, body: unknown) => {
@@ -36,19 +36,6 @@ describe('connectors', () => {
 		stub(200, { m365: { status: 'ok', email: 's@firm.au' }, google: { status: 'disconnected' } });
 		const out = await getConnectors('tok');
 		expect(out.google.status).toBe('disconnected');
-	});
-
-	it('authorize returns the URL to navigate to', async () => {
-		const calls = stub(200, { url: 'https://consent' });
-		expect(await authorizeConnector('tok', 'google')).toBe('https://consent');
-		expect(calls[0].url).toBe('/gw/connectors/google/authorize');
-	});
-
-	it('disconnect uses DELETE', async () => {
-		const calls = stub(200, { disconnected: true });
-		expect(await disconnectConnector('tok', 'm365')).toBe(true);
-		expect(calls[0].init.method).toBe('DELETE');
-		expect(calls[0].url).toBe('/gw/connectors/m365');
 	});
 });
 
