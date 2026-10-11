@@ -32,13 +32,13 @@ export const ENQUIRY_ROWS: EnquiryRow[] = [
 		title: 'FSG',
 		kind: 'document',
 		detail:
-			'Financial Services Guide — drafted and emailed. Done when the client replies or a file comes back.'
+			'Financial Services Guide — drafted into the client’s folder, then emailed from your mailbox. Done at send.'
 	},
 	{
 		step: 'enquiry.fact_find',
 		title: 'Fact Find',
 		kind: 'document',
-		detail: 'Drafted and emailed. Done when the completed form comes back.'
+		detail: 'Drafted into the client’s folder, then emailed from your mailbox. Done at send.'
 	},
 	{
 		step: 'enquiry.discovery_meeting',
