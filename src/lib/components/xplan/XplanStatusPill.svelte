@@ -24,6 +24,7 @@
 	let loggedIn: boolean | null = null;
 	let helper: 'running' | 'not-installed' | undefined;
 	let helperDownload = false;
+	let notEnabled = false;
 	let probed = false;
 	// The gateway itself is unreachable (network/CORS/auth), as opposed to
 	// reachable-but-reporting-a-problem. Tracked separately so the pill can say
@@ -38,6 +39,8 @@
 		? 'unreachable'
 		: !probed
 		? 'checking'
+		: notEnabled
+		? 'not-enabled'
 		: !browserUp
 			? helper === 'not-installed' ? 'no-helper' : 'browser-down'
 			: loggedIn !== true
@@ -49,6 +52,7 @@
 	$: label = {
 		checking: 'Checking…',
 		unreachable: "Can't reach axi",
+		'not-enabled': 'XPLAN not enabled',
 		'browser-down': 'Browser not running',
 		'no-helper': helperDownload ? 'Connect your computer' : 'Helper not installed',
 		signin: 'Sign in to XPLAN',
@@ -59,6 +63,7 @@
 	$: dot = {
 		checking: 'bg-gray-400',
 		unreachable: 'bg-red-500',
+		'not-enabled': 'bg-gray-400',
 		'browser-down': 'bg-red-500',
 		'no-helper': 'bg-amber-500',
 		signin: 'bg-amber-500',
@@ -76,6 +81,7 @@
 			loggedIn = s.loggedIn;
 			helper = s.helper;
 			helperDownload = !!s.helperDownload;
+			notEnabled = !!s.notEnabled;
 			level = lvl;
 			probed = true;
 			unreachable = false;

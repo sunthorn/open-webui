@@ -32,6 +32,8 @@
 	let loggedIn: boolean | null = null;
 	let helper: 'running' | 'not-installed' | undefined;
 	let helperDownload = false;
+	// Not on XPLAN_ALLOWED_USERS. Every step below would 403, so none is shown.
+	let notEnabled = false;
 	let probed = false;
 	// The gateway itself is unreachable (network/CORS/auth), as opposed to
 	// reachable-but-reporting-a-problem. Tracked separately so the page can say
@@ -88,6 +90,7 @@
 			loggedIn = s.loggedIn;
 			helper = s.helper;
 			helperDownload = !!s.helperDownload;
+			notEnabled = !!s.notEnabled;
 			level = lvl;
 			probed = true;
 			unreachable = false;
@@ -215,6 +218,18 @@
 		</div>
 	{/if}
 
+	{#if notEnabled}
+		<div
+			class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6"
+		>
+			<h2 class="text-sm font-semibold">XPLAN isn't enabled for your account</h2>
+			<p class="text-sm text-gray-500 mt-1">
+				This axi reaches XPLAN through one signed-in browser, so only the people an
+				administrator has listed can use it — anyone else would be working in XPLAN as
+				that person. Ask your axi administrator to add you.
+			</p>
+		</div>
+	{:else}
 	<div
 		class="rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6"
 	>
@@ -399,4 +414,5 @@
 			Stepping down from Full always returns to Read-only, never straight back to Full.
 		</p>
 	</div>
+	{/if}
 </div>

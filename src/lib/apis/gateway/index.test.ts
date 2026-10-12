@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { downloadXplanHelper, disconnectXplanHelper } from './index';
+import { downloadXplanHelper, disconnectXplanHelper, getXplanStatus } from './index';
 
 describe('downloadXplanHelper', () => {
 	it('GETs the zip for the OS with the bearer and returns the blob', async () => {
@@ -34,5 +34,20 @@ describe('disconnectXplanHelper', () => {
 		expect(fetchFn).toHaveBeenCalledWith('/gw/xplan/helper', {
 			method: 'DELETE', headers: { Authorization: 'Bearer tok' }
 		});
+	});
+});
+
+describe('getXplanStatus', () => {
+	it('reports a 403 as "not enabled for you", not as a browser that is down', async () => {
+		const fetchFn = vi.fn().mockResolvedValue({
+			ok: false, status: 403, json: async () => ({ detail: 'xplan is not enabled for this account' })
+		});
+		expect(await getXplanStatus('tok', fetchFn)).toEqual({
+			browserUp: false, loggedIn: null, notEnabled: true
+		});
+	});
+	it('still throws on other failures', async () => {
+		const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => ({}) });
+		await expect(getXplanStatus('tok', fetchFn)).rejects.toThrow('Gateway error (502)');
 	});
 });

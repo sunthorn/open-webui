@@ -115,12 +115,21 @@ export interface XplanStatus {
 	helper?: 'running' | 'not-installed';
 	/** The gateway offers a per-planner helper download (hosted stacks). */
 	helperDownload?: boolean;
+	/** This account is not on XPLAN_ALLOWED_USERS: nothing below applies to it. */
+	notEnabled?: boolean;
 }
 
-export const getXplanStatus = async (token: string): Promise<XplanStatus> => {
-	const res = await fetch(`${gatewayUrl()}/gw/xplan/status`, {
+export const getXplanStatus = async (
+	token: string,
+	fetchFn: typeof fetch = fetch
+): Promise<XplanStatus> => {
+	const res = await fetchFn(`${gatewayUrl()}/gw/xplan/status`, {
 		headers: { Authorization: `Bearer ${token}` }
 	});
+	// contact-layer's XPLAN_ALLOWED_USERS refusal. Callers used to swallow it
+	// into "browser down", which sent the planner to reopen a browser they were
+	// never allowed to use.
+	if (res.status === 403) return { browserUp: false, loggedIn: null, notEnabled: true };
 	if (!res.ok) throw new Error(`Gateway error (${res.status})`);
 	return (await res.json()) as XplanStatus;
 };
