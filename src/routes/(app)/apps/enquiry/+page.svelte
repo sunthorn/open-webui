@@ -759,16 +759,26 @@
 					sent is not cancelled.
 				</p>
 			{/if}
-			<label class="block mt-3 text-xs text-gray-500"
-				>Your booking page (Outlook Bookings with me or a Google appointment schedule)
-				<input
-					bind:value={linkUrl}
-					placeholder="https://outlook.office.com/bookwithme/…"
-					maxlength="500"
-					class="mt-1 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
-				/>
-			</label>
-			<p class="text-xs text-gray-400 mt-1">Saved for next time. Change it later in Settings.</p>
+			{#if linkSaved}
+				<p class="mt-3 text-xs text-gray-500">Your booking page</p>
+				<p class="text-sm font-medium break-all">{linkSaved}</p>
+				<p class="text-xs text-gray-400 mt-1">
+					Change it in <a href="/x/salem/connectors#booking-page" class="underline">Meetings › Connections</a>.
+				</p>
+			{:else}
+				<label class="block mt-3 text-xs text-gray-500"
+					>Your booking page (Outlook Bookings with me or a Google appointment schedule)
+					<input
+						bind:value={linkUrl}
+						placeholder="https://outlook.office.com/bookwithme/…"
+						maxlength="500"
+						class="mt-1 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+					/>
+				</label>
+				<p class="text-xs text-gray-400 mt-1">
+					Saved for next time. Change it later in Meetings › Connections.
+				</p>
+			{/if}
 			<div class="text-sm mt-3 flex flex-wrap items-center gap-1">
 				<span>To</span>
 				{#if (contact?.emails ?? []).length > 1}

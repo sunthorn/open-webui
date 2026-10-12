@@ -22,42 +22,10 @@
 		type XplanAccessLevel
 	} from '$lib/apis/gateway';
 	import { helperPanel, installCommands } from '$lib/apis/gateway/helper';
-	import { getBookingLink, saveBookingLink } from '$lib/apis/gateway/onboarding';
 	import { copyToClipboard } from '$lib/utils';
 	import XplanAccessControl from '$lib/components/xplan/XplanAccessControl.svelte';
 
 	const token = () => localStorage.getItem('token') ?? '';
-
-	// The planner's booking page, mailed by the enquiry page's "Send booking
-	// link" (docs/superpowers/specs/2026-10-12-booking-link-design.md).
-	let bookingSaved: string | null = null;
-	let bookingUrl = '';
-	let bookingBusy = false;
-	let bookingMsg = '';
-	let bookingErr = false;
-	const loadBooking = async () => {
-		try {
-			bookingSaved = await getBookingLink(token());
-			bookingUrl = bookingSaved ?? '';
-		} catch {
-			/* unreadable: the field stays empty; saving still works */
-		}
-	};
-	const saveBooking = async (url: string) => {
-		bookingBusy = true;
-		bookingMsg = '';
-		try {
-			bookingSaved = await saveBookingLink(token(), url);
-			bookingUrl = bookingSaved ?? '';
-			bookingErr = false;
-			bookingMsg = bookingSaved ? 'Saved.' : 'Removed.';
-		} catch (e) {
-			bookingErr = true;
-			bookingMsg = e instanceof Error ? e.message : String(e);
-		} finally {
-			bookingBusy = false;
-		}
-	};
 
 	let level: XplanAccessLevel = 'readonly';
 	let browserUp = false;
@@ -212,7 +180,6 @@
 			unreachable = true;
 			loaded = true;
 		}
-		void loadBooking();
 		timer = setInterval(refresh, 30_000);
 		window.addEventListener('focus', onFocus);
 		document.addEventListener('visibilitychange', onFocus);
@@ -448,46 +415,4 @@
 		</p>
 	</div>
 	{/if}
-
-	<div
-		class="mt-6 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-850 p-6"
-	>
-		<h2 class="text-sm font-semibold">Booking page</h2>
-		<p class="text-sm text-gray-500 mt-1">
-			Your Outlook Bookings with me or Google appointment schedule link. "Send booking link" on a
-			client's enquiry emails it, and the step ticks itself once the meeting is in your calendar.
-		</p>
-		<div class="mt-3 flex flex-wrap items-center gap-2">
-			<input
-				bind:value={bookingUrl}
-				placeholder="https://outlook.office.com/bookwithme/…"
-				maxlength="500"
-				aria-label="Booking page link"
-				class="min-w-0 flex-1 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
-			/>
-			<button
-				type="button"
-				on:click={() => saveBooking(bookingUrl)}
-				disabled={bookingBusy || !bookingUrl.trim() || bookingUrl.trim() === bookingSaved}
-				class="text-xs font-medium px-2.5 py-2 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
-			>
-				Save
-			</button>
-			{#if bookingSaved}
-				<button
-					type="button"
-					on:click={() => saveBooking('')}
-					disabled={bookingBusy}
-					class="text-xs font-medium px-2.5 py-2 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-white dark:hover:bg-gray-900 disabled:opacity-40 transition"
-				>
-					Remove
-				</button>
-			{/if}
-		</div>
-		{#if bookingMsg}
-			<p class="text-xs mt-2 {bookingErr ? 'text-red-600 dark:text-red-400' : 'text-gray-500'}">
-				{bookingMsg}
-			</p>
-		{/if}
-	</div>
 </div>
