@@ -46,6 +46,7 @@
 		sendModeOf,
 		sendsAgain,
 		slotOf,
+		bookingOf,
 		slotsOf,
 		type SendMode
 	} from '$lib/apps/onboarding';
@@ -466,7 +467,12 @@
 								<p class="text-xs text-gray-400 mt-1">Sent to {emailOf(a)?.to}</p>
 							{/if}
 							{#if a && row.kind === 'booking' && slotOf(a)}
-								<p class="text-xs text-gray-400 mt-1">Invite sent for {slotOf(a)?.label}</p>
+								{@const b = bookingOf(a)}
+								<p class="text-xs text-gray-400 mt-1">
+									Invite sent for {slotOf(a)?.label}
+									{#if b.link}· <a href={b.link} target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 dark:hover:text-gray-200">Open in {b.where} ↗</a>{/if}
+									{#if b.reply}· <span class={b.declined ? 'text-red-600 dark:text-red-400' : ''}>{b.reply}</span>{/if}
+								</p>
 							{/if}
 							{#if a && row.kind === 'booking' && a.status !== 'done' && slotsOf(a).length}
 								{#if pickNeedsAgain(a)}

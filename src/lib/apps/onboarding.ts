@@ -134,6 +134,23 @@ export const slotsOf = (a: OnboardingAction) =>
 export const slotOf = (a: OnboardingAction) =>
 	(a.detail?.slot as { start: string; end: string; label: string } | undefined) ?? null;
 
+const RSVP_LABEL: Record<string, string> = { none: 'Awaiting reply', tentative: 'Tentative', declined: 'Declined' };
+
+/**
+ * The booked invite as the row shows it: a link to the event in the planner's
+ * calendar (contact-layer passes only https links to the provider's own host;
+ * checked again here because it lands in an href) and the client's latest
+ * reply. An accept completes the row, so a done row reads "Accepted".
+ */
+export const bookingOf = (a: OnboardingAction) => {
+	const d = a.detail ?? {};
+	const raw = typeof d.web_link === 'string' ? d.web_link : '';
+	const link = raw.startsWith('https://') ? raw : null;
+	const where = d.provider === 'google' ? 'Google Calendar' : 'Outlook';
+	const reply = a.status === 'done' ? 'Accepted' : (RSVP_LABEL[String(d.rsvp ?? 'none')] ?? null);
+	return { link, where, reply, declined: d.rsvp === 'declined' && a.status !== 'done' };
+};
+
 /**
  * Who Send mails: the address the draft recorded, else the client's current
  * email from the last XPLAN sync (onb_send works it out again at send time,

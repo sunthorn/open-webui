@@ -13,6 +13,7 @@ import {
 	isStuckDrafting,
 	runningFor,
 	slotOf,
+	bookingOf,
 	sendModeOf,
 	sendsAgain,
 	pickNeedsAgain,
@@ -157,6 +158,17 @@ describe('Stage 1 gating', () => {
 		expect(
 			slotOf(a(BOOK_STEP, 'sent', { slot: { start: 's', end: 'e', label: 'Tue' } }))?.label
 		).toBe('Tue');
+	});
+
+	it('a booked row links to the event and says how the client replied', () => {
+		const link = 'https://outlook.office365.com/owa/?itemid=X';
+		expect(bookingOf(a(BOOK_STEP, 'sent', { web_link: link, rsvp: 'none', provider: 'm365' }))).toEqual({
+			link, where: 'Outlook', reply: 'Awaiting reply', declined: false
+		});
+		const declined = bookingOf(a(BOOK_STEP, 'sent', { rsvp: 'declined', provider: 'google' }));
+		expect(declined).toMatchObject({ link: null, where: 'Google Calendar', reply: 'Declined', declined: true });
+		expect(bookingOf(a(BOOK_STEP, 'done', { rsvp: 'declined' })).reply).toBe('Accepted');
+		expect(bookingOf(a(BOOK_STEP, 'sent', { web_link: 'javascript:alert(1)' })).link).toBeNull();
 	});
 
 	it('auto-drafts only rows whose template exists; no templates map means unknown', () => {
