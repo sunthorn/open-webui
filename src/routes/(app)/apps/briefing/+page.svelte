@@ -14,16 +14,13 @@
 		type AgendaResponse, type AgendaEvent, type AgendaTask, type ConnectorsResponse
 	} from '$lib/apis/gateway/agenda';
 	import {
-		fallbackAttention, sourceCalendars, toCalendarEvents,
-		snoozeUntil, describeChange, applyChange, type AgendaChange,
-		weekStartOf, shiftWeek, weekWindow, weekLabel, weekScrollHour, narrativePoints
+		fallbackAttention, snoozeUntil, describeChange, applyChange, type AgendaChange, narrativePoints
 	} from '$lib/apps/agenda';
 	import ClientPicker from '$lib/components/apps/ClientPicker.svelte';
 	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
-	import CalendarView from '$lib/components/calendar/CalendarView.svelte';
 	import SourceChips from '$lib/components/agenda/SourceChips.svelte';
-	import DayTimeline from '$lib/components/agenda/DayTimeline.svelte';
-	import TodoByClient from '$lib/components/agenda/TodoByClient.svelte';
+	import AgendaCalendar from '$lib/components/agenda/AgendaCalendar.svelte';
+	import TodoList from '$lib/components/agenda/TodoList.svelte';
 	import EventPanel from '$lib/components/agenda/EventPanel.svelte';
 
 	const token = () => localStorage.getItem('token') ?? '';
@@ -36,39 +33,10 @@
 	let loading = true;
 	let loadError = '';
 	let err = '';
-	let view: 'today' | 'week' = 'today';
 	let selected: AgendaEvent | null = null;
-
-	// Week view has its own fetch for whichever week is shown (Sunday to
-	// Saturday, as the grid draws it); the page's agenda covers today + 7 days.
-	let weekStart = weekStartOf(new Date());
-	let weekAgenda: AgendaResponse | null = null;
-	let weekLoading = false;
-	let weekError = '';
-	let weekSeq = 0;
-	const loadWeek = async (refresh = false) => {
-		const seq = ++weekSeq; // a newer week's answer wins over a slower, older one
-		weekLoading = true;
-		weekError = '';
-		const { from, to } = weekWindow(weekStart);
-		try {
-			const a = await getAgenda(token(), from, to, refresh);
-			if (seq === weekSeq) weekAgenda = a;
-		} catch (e: any) {
-			if (seq === weekSeq) weekError = e?.message ?? 'Could not load this week';
-		} finally {
-			if (seq === weekSeq) weekLoading = false;
-		}
-	};
-	const goWeek = (weeks: number | null) => {
-		weekStart = weeks === null ? weekStartOf(new Date()) : shiftWeek(weekStart, weeks);
-		weekAgenda = null;
-		void loadWeek();
-	};
-	const showWeek = () => {
-		view = 'week';
-		if (!weekAgenda) void loadWeek();
-	};
+	// Bumped after every reload so the calendar re-reads the range it shows
+	// (it fetches its own data outside the page's today + 7 days).
+	let refreshKey = 0;
 	let greeting = 'Hello';
 	let busyId: string | null = null;
 	let assigning: AgendaTask | AgendaEvent | null = null;
@@ -76,11 +44,6 @@
 	$: xplanLocked = agenda?.sources.xplan?.status === 'locked';
 	$: sourceErrors = Object.entries(agenda?.sources ?? {}).filter(([, s]) => s?.status === 'error') as [string, { message?: string }][];
 	$: attention = agenda ? fallbackAttention(agenda.tasks, today) : { overdue: 0, dueToday: [] };
-	$: weekEvents = weekAgenda ? toCalendarEvents(weekAgenda.events) : [];
-	$: weekHour = weekScrollHour(weekAgenda?.events ?? []);
-	$: thisWeek = isoDate(weekStart) === isoDate(weekStartOf(new Date()));
-	const calendars = sourceCalendars();
-	const visible = new Set(calendars.map((c) => c.id));
 
 	// Keeps the open event panel showing the current agenda's copy of the
 	// selected event — after a write, a reload, or a rollback — instead of a
@@ -88,7 +51,7 @@
 	const resync = () => {
 		if (!selected) return;
 		const id = selected.id;
-		selected = agenda?.events.find((e) => e.id === id) ?? weekAgenda?.events.find((e) => e.id === id) ?? selected;
+		selected = agenda?.events.find((e) => e.id === id) ?? selected;
 	};
 
 	const load = async (refresh = false) => {
@@ -100,7 +63,7 @@
 				getConnectors(token()).catch(() => null),
 				getBriefing(token()).catch(() => null)
 			]);
-			if (weekAgenda || view === 'week') await loadWeek(refresh);
+			refreshKey += 1;
 			resync();
 		} catch (e: any) {
 			loadError = e?.message ?? 'Could not load your agenda';
@@ -139,17 +102,14 @@
 		if (!agenda || !confirm(describeChange(c))) return;
 		err = '';
 		const before = agenda;
-		const weekBefore = weekAgenda;
 		busyId = itemOf(c).id;
 		agenda = applyChange(agenda, c);
-		if (weekAgenda) weekAgenda = applyChange(weekAgenda, c);
 		resync();
 		try {
 			await post(c);
 			await load(true);
 		} catch (e: any) {
 			agenda = before;
-			weekAgenda = weekBefore;
 			resync();
 			err = e?.message ?? 'The change did not go through';
 		} finally {
@@ -193,7 +153,7 @@
 	};
 </script>
 
-<div class="max-w-5xl mx-auto px-8 py-10">
+<div class="max-w-7xl mx-auto px-4 sm:px-8 py-10">
 	<div class="flex flex-wrap items-start justify-between gap-4 mb-6">
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">{greeting}</h1>
@@ -278,37 +238,13 @@
 			</section>
 
 			<section>
-				<div class="flex items-center justify-between mb-3">
-					<h2 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Calendar</h2>
-					<div class="text-xs rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-						<button class="px-3 py-1 {view === 'today' ? 'bg-gray-100 dark:bg-gray-800 font-medium' : ''}" on:click={() => (view = 'today')}>Today</button>
-						<button class="px-3 py-1 {view === 'week' ? 'bg-gray-100 dark:bg-gray-800 font-medium' : ''}" on:click={showWeek}>Week</button>
-					</div>
-				</div>
-				<div class="grid gap-4 {selected ? 'md:grid-cols-[1fr_18rem]' : ''}">
-					<div>
-						{#if view === 'today'}
-							<DayTimeline events={agenda.events} day={today} on:select={(e) => (selected = e.detail)} />
-						{:else}
-							<!-- CalendarView's week grid is absolutely positioned and fills its
-							     parent, so the parent needs a height of its own: without one it
-							     collapsed to an empty strip. -->
-							<div class="flex items-center gap-2 mb-2 text-sm">
-								<button class="px-2 py-0.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Previous week" on:click={() => goWeek(-1)}>‹</button>
-								<button class="px-2 py-0.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Next week" on:click={() => goWeek(1)}>›</button>
-								<span class="font-medium">{weekLabel(weekStart)}</span>
-								{#if !thisWeek}
-									<button class="text-xs px-2 py-0.5 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800" on:click={() => goWeek(null)}>This week</button>
-								{/if}
-								{#if weekLoading}<span class="text-xs text-gray-400">loading…</span>{/if}
-								{#if weekError}<span class="text-xs text-red-500">{weekError} — <button class="underline" on:click={() => loadWeek()}>try again</button></span>{/if}
-							</div>
-							<div class="h-[36rem] rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
-								<CalendarView events={weekEvents} {calendars} visibleCalendarIds={visible} view="week" currentDate={weekStart}
-									scrollToHour={weekHour}
-									on:eventClick={(e) => (selected = weekAgenda?.events.find((x) => x.id === e.detail.id) ?? null)} />
-							</div>
-						{/if}
+				<h2 class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-3">Calendar</h2>
+				<div class="grid gap-4 {selected ? 'lg:grid-cols-[1fr_18rem]' : ''}">
+					<div class="min-w-0">
+						<AgendaCalendar token={token()} {today} todayEvents={agenda.events} {refreshKey}
+							selectedId={selected?.id ?? null}
+							on:select={(e) => (selected = e.detail)}
+							on:move={(e) => run({ kind: 'move', ...e.detail })} />
 					</div>
 					{#if selected}
 						<EventPanel event={selected} {xplanLocked} busy={busyId === selected.id}
@@ -321,8 +257,8 @@
 			</section>
 
 			<section id="todo-by-client" class="scroll-mt-4">
-				<h2 class="text-xs font-semibold uppercase tracking-wide mb-3 text-gray-500">To do, by client</h2>
-				<TodoByClient tasks={agenda.tasks} {today} {xplanLocked} {busyId} on:open={(e) => open(e.detail)}
+				<h2 class="text-xs font-semibold uppercase tracking-wide mb-3 text-gray-500">To do</h2>
+				<TodoList tasks={agenda.tasks} {today} {xplanLocked} {busyId} on:open={(e) => open(e.detail)}
 					on:complete={(e) => run({ kind: 'complete', task: e.detail })}
 					on:snooze={(e) => run({ kind: 'snooze', task: e.detail.task, until: snoozeUntil(today, e.detail.choice) })}
 					on:accept={(e) => e.detail.suggestion && run({ kind: 'pin', item: e.detail, clientId: e.detail.suggestion.clientId, clientName: e.detail.suggestion.name })}

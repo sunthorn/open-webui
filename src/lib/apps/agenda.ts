@@ -14,8 +14,6 @@ export const SOURCE_META: Record<AgendaSource, { label: string; color: string; o
 
 const NS = 1_000_000;
 const DEFAULT_START = 7;
-const DEFAULT_END = 19;
-const MIN_HEIGHT_PCT = 3;
 
 /** A bare date ('2026-09-14') is a calendar day; anything longer is a timestamp in the local zone. */
 export const localDay = (iso: string): string => (iso.length <= 10 ? iso : isoDate(new Date(iso)));
@@ -27,71 +25,12 @@ const byDue = (a: AgendaTask, b: AgendaTask): number => {
 	return a.dueAt.localeCompare(b.dueAt) || a.title.localeCompare(b.title);
 };
 
-export interface TaskGroup {
-	key: string;
-	label: string;
-	kind: 'overdue' | 'client' | 'unassigned';
-	tasks: AgendaTask[];
-}
-
-export const groupTasks = (tasks: AgendaTask[], _today: string): TaskGroup[] => {
-	const overdue = tasks.filter((t) => t.status === 'overdue').sort(byDue);
-	const rest = tasks.filter((t) => t.status !== 'overdue');
-	const clients = new Map<string, TaskGroup>();
-	const unassigned: AgendaTask[] = [];
-	for (const t of rest) {
-		if (!t.client) {
-			unassigned.push(t);
-			continue;
-		}
-		const g = clients.get(t.client.id) ?? { key: t.client.id, label: t.client.name, kind: 'client' as const, tasks: [] };
-		g.tasks.push(t);
-		clients.set(t.client.id, g);
-	}
-	const out: TaskGroup[] = [];
-	if (overdue.length) out.push({ key: 'overdue', label: 'Overdue', kind: 'overdue', tasks: overdue });
-	out.push(
-		...[...clients.values()]
-			.sort((a, b) => a.label.localeCompare(b.label))
-			.map((g) => ({ ...g, tasks: g.tasks.sort(byDue) }))
-	);
-	if (unassigned.length) out.push({ key: 'unassigned', label: 'Unassigned', kind: 'unassigned', tasks: unassigned.sort(byDue) });
-	return out;
-};
+export const allDayOn = (events: AgendaEvent[], day: string): AgendaEvent[] =>
+	events.filter((e) => e.allDay && localDay(e.startAt) <= day && day <= localDay(e.endAt || e.startAt));
 
 const hourOf = (iso: string): number => {
 	const d = new Date(iso);
 	return d.getHours() + d.getMinutes() / 60;
-};
-
-export const eventsOn = (events: AgendaEvent[], day: string): AgendaEvent[] =>
-	events.filter((e) => !e.allDay && localDay(e.startAt) === day).sort((a, b) => Date.parse(a.startAt) - Date.parse(b.startAt));
-
-export const allDayOn = (events: AgendaEvent[], day: string): AgendaEvent[] =>
-	events.filter((e) => e.allDay && localDay(e.startAt) <= day && day <= localDay(e.endAt || e.startAt));
-
-export const timelineRange = (events: AgendaEvent[], day: string): { startHour: number; endHour: number } => {
-	let start = DEFAULT_START;
-	let end = DEFAULT_END;
-	for (const e of eventsOn(events, day)) {
-		start = Math.min(start, Math.floor(hourOf(e.startAt)));
-		end = Math.max(end, Math.ceil(hourOf(e.endAt || e.startAt)));
-	}
-	return { startHour: Math.max(0, start), endHour: Math.min(24, Math.max(end, start + 1)) };
-};
-
-export const placeEvent = (
-	e: AgendaEvent,
-	range: { startHour: number; endHour: number },
-	day: string
-): { top: number; height: number } | null => {
-	if (e.allDay || localDay(e.startAt) !== day) return null;
-	const span = range.endHour - range.startHour;
-	const s = Math.max(hourOf(e.startAt), range.startHour);
-	const en = Math.min(hourOf(e.endAt || e.startAt), range.endHour);
-	const top = ((s - range.startHour) / span) * 100;
-	const height = Math.max(MIN_HEIGHT_PCT, ((en - s) / span) * 100);
-	return { top, height };
 };
 
 const midnightNs = (day: string, plusDays = 0): number => {
