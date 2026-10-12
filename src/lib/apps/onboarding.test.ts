@@ -14,6 +14,9 @@ import {
 	runningFor,
 	slotOf,
 	bookingOf,
+	bookedByClientOf,
+	bookingLinkEmail,
+	linkSentOf,
 	sendModeOf,
 	sendsAgain,
 	pickNeedsAgain,
@@ -304,5 +307,36 @@ describe('recipientOf / canSend with the client contact', () => {
 	it('keeps the draft recipient first', () => {
 		const drafted = { step: 'enquiry.fsg', status: 'ready', detail: { email: { to: 'a@x.com' } } } as never;
 		expect(recipientOf(drafted, contact)).toBe('a@x.com');
+	});
+});
+
+describe('the booking link', () => {
+	it('a link-mode row says who the link went to; an invite row is not a link row', () => {
+		expect(linkSentOf(a(BOOK_STEP, 'sent', { mode: 'link', sent_to: 'john@example.com' }))).toEqual({
+			to: 'john@example.com'
+		});
+		expect(linkSentOf(a(BOOK_STEP, 'sent', { mode: 'invite', sent_to: 'x@y.z' }))).toBeNull();
+		expect(linkSentOf(a(BOOK_STEP, 'sent', {}))).toBeNull();
+	});
+
+	it('a client booking reads "Booked by the client", never "Accepted"', () => {
+		const done = a(BOOK_STEP, 'done', {
+			mode: 'link',
+			evidence: { kind: 'booked', start: '2026-10-16T00:00:00+00:00' },
+			web_link: 'https://outlook.office.com/calendar/item/e-1'
+		});
+		const b = bookedByClientOf(done, 'Australia/Sydney');
+		expect(b?.label).toBe('Fri 16 Oct, 11:00 AM');
+		expect(bookingOf(done).reply).toBe('Booked by the client');
+		expect(bookedByClientOf(a(BOOK_STEP, 'done', { evidence: { kind: 'accepted' } }))).toBeNull();
+		expect(bookedByClientOf(a(BOOK_STEP, 'sent', { evidence: { kind: 'booked', start: 'x' } }))).toBeNull();
+	});
+
+	it('the default wording greets the client by first name from either name order', () => {
+		expect(bookingLinkEmail('Smith, John').html).toContain('<p>Hi John,</p>');
+		expect(bookingLinkEmail('Mary Jones').html).toContain('<p>Hi Mary,</p>');
+		expect(bookingLinkEmail('').html).toContain('<p>Hi there,</p>');
+		expect(bookingLinkEmail('<b>x</b>, <i>').html).not.toContain('<b>');
+		expect(bookingLinkEmail('Smith, John').subject).toBe('Book your discovery meeting');
 	});
 });

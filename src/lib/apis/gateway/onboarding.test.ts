@@ -6,7 +6,9 @@ import {
 	setStage,
 	runAction,
 	getActivity,
-	listLeads
+	listLeads,
+	getBookingLink,
+	saveBookingLink
 } from './onboarding';
 import { STAGES as CONTRACT } from '../../../../../shared-contracts/types/onboarding';
 import { GatewayError } from './index';
@@ -118,5 +120,26 @@ describe('setAction with notes', () => {
 		const calls = stub(200, { action: {} });
 		await setAction(TOKEN, '899317', 'data_entry.gather_missing', 'done');
 		expect(JSON.parse(String(calls[0].init.body))).toEqual({ status: 'done' });
+	});
+});
+
+describe('booking link', () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it('reads the caller\'s link', async () => {
+		const calls = stub(200, { url: 'https://book.ms/b/s/x' });
+		expect(await getBookingLink(TOKEN)).toBe('https://book.ms/b/s/x');
+		expect(calls[0].url).toBe('/gw/onboarding/booking-link');
+	});
+
+	it('saves it with PUT and surfaces the gateway\'s refusal', async () => {
+		const calls = stub(200, { url: 'https://book.ms/b/s/x' });
+		expect(await saveBookingLink(TOKEN, ' https://book.ms/b/s/x ')).toBe('https://book.ms/b/s/x');
+		expect(calls[0].init.method).toBe('PUT');
+		expect(JSON.parse(String(calls[0].init.body))).toEqual({ url: 'https://book.ms/b/s/x' });
+		stub(400, { detail: 'That is not a Bookings with me or Google appointment page link' });
+		await expect(saveBookingLink(TOKEN, 'https://evil.example')).rejects.toThrow('not a Bookings');
 	});
 });

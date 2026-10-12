@@ -147,8 +147,77 @@ export const bookingOf = (a: OnboardingAction) => {
 	const raw = typeof d.web_link === 'string' ? d.web_link : '';
 	const link = raw.startsWith('https://') ? raw : null;
 	const where = d.provider === 'google' ? 'Google Calendar' : 'Outlook';
-	const reply = a.status === 'done' ? 'Accepted' : (RSVP_LABEL[String(d.rsvp ?? 'none')] ?? null);
+	const booked = (d.evidence as { kind?: string } | undefined)?.kind === 'booked';
+	const reply =
+		a.status === 'done'
+			? booked
+				? 'Booked by the client'
+				: 'Accepted'
+			: d.mode === 'link'
+				? null
+				: (RSVP_LABEL[String(d.rsvp ?? 'none')] ?? null);
 	return { link, where, reply, declined: d.rsvp === 'declined' && a.status !== 'done' };
+};
+
+// --- the booking link (docs/superpowers/specs/2026-10-12-booking-link-design.md) ---
+
+/** The row was booked by mailing the planner's booking page: who it went to. */
+export const linkSentOf = (a: OnboardingAction) => {
+	const d = a.detail ?? {};
+	if (d.mode !== 'link') return null;
+	return { to: typeof d.sent_to === 'string' ? d.sent_to : null };
+};
+
+/** "Fri 16 Oct, 11:00 AM" — the slot labels' format, in the planner's zone. */
+const meetingLabel = (iso: string, timeZone?: string): string | null => {
+	const t = new Date(iso);
+	if (Number.isNaN(t.getTime())) return null;
+	const parts = Object.fromEntries(
+		new Intl.DateTimeFormat('en-AU', {
+			weekday: 'short',
+			day: 'numeric',
+			month: 'short',
+			hour: 'numeric',
+			minute: '2-digit',
+			hour12: true,
+			timeZone
+		})
+			.formatToParts(t)
+			.map((p) => [p.type, p.value])
+	);
+	return `${parts.weekday} ${parts.day} ${parts.month}, ${parts.hour}:${parts.minute} ${String(parts.dayPeriod).toUpperCase()}`;
+};
+
+/** A meeting the client booked on the planner's page (onb_detect's evidence). */
+export const bookedByClientOf = (a: OnboardingAction, timeZone?: string) => {
+	const ev = a.detail?.evidence as { kind?: string; start?: string } | undefined;
+	if (a.status !== 'done' || ev?.kind !== 'booked' || typeof ev.start !== 'string') return null;
+	const label = meetingLabel(ev.start, timeZone);
+	return label ? { label } : null;
+};
+
+const escapeHtml = (s: string) =>
+	s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** XPLAN names read "Surname, First"; anything else is "First Surname". */
+const firstName = (name: string): string => {
+	const n = name.includes(',') ? name.split(',')[1] : name;
+	return (n ?? '').trim().split(/\s+/)[0] ?? '';
+};
+
+/**
+ * The fixed, editable booking-link email. The link itself is added by the
+ * gateway when it sends — the body never carries one (it would be stripped).
+ */
+export const bookingLinkEmail = (clientName: string) => {
+	const first = firstName(clientName).replace(/[<>&"']/g, '') || 'there';
+	return {
+		subject: 'Book your discovery meeting',
+		html:
+			`<p>Hi ${escapeHtml(first)},</p>` +
+			'<p>Thank you for sending through your documents. Please choose a time that suits you ' +
+			'for our discovery meeting using the link below.</p>'
+	};
 };
 
 /**

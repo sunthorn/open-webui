@@ -135,6 +135,24 @@ const auth = (token: string) => ({
 
 const base = (client: string) => `${gatewayUrl()}/gw/onboarding/${encodeURIComponent(client)}`;
 
+/** The caller's booking page (Bookings with me / Google appointment schedule), or null. */
+export const getBookingLink = async (token: string): Promise<string | null> => {
+	const res = await fetch(`${gatewayUrl()}/gw/onboarding/booking-link`, { headers: auth(token) });
+	if (!res.ok) throw await gatewayError(res);
+	return (await res.json()).url ?? null;
+};
+
+/** Save (an empty string clears) the caller's booking page; the gateway 400s anything else. */
+export const saveBookingLink = async (token: string, url: string): Promise<string | null> => {
+	const res = await fetch(`${gatewayUrl()}/gw/onboarding/booking-link`, {
+		method: 'PUT',
+		headers: auth(token),
+		body: JSON.stringify({ url: url.trim() })
+	});
+	if (!res.ok) throw await gatewayError(res);
+	return (await res.json()).url ?? null;
+};
+
 export const getOnboarding = async (token: string, client: string): Promise<OnboardingState> => {
 	const res = await fetch(base(client), { headers: auth(token) });
 	if (!res.ok) throw await gatewayError(res);

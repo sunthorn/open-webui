@@ -17,6 +17,8 @@
 		runAction,
 		setAction,
 		setStage,
+		getBookingLink,
+		saveBookingLink,
 		type OnboardingAction,
 		type OnboardingJobKind,
 		type OnboardingState,
@@ -47,6 +49,9 @@
 		sendsAgain,
 		slotOf,
 		bookingOf,
+		bookedByClientOf,
+		bookingLinkEmail,
+		linkSentOf,
 		slotsOf,
 		type SendMode
 	} from '$lib/apps/onboarding';
@@ -56,6 +61,7 @@
 	import PaperAirplane from '$lib/components/icons/PaperAirplane.svelte';
 	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
 	import Calendar from '$lib/components/icons/Calendar.svelte';
+	import Link from '$lib/components/icons/Link.svelte';
 
 	let state: OnboardingState | null = null;
 	let loading = true;
@@ -83,6 +89,17 @@
 	let pickChosen = '';
 	let choosing: Step | null = null;
 
+	// Booking-link window: the row it is for, the planner's saved page (null =
+	// none yet), the link as typed, and the editable email.
+	let linkFor: OnboardingAction | null = null;
+	let linkSaved: string | null = null;
+	let linkUrl = '';
+	let linkTo = '';
+	let linkSubject = '';
+	let linkHtml = '';
+	let linkBusy = false;
+	let linkErr = '';
+
 	const token = () => localStorage.getItem('token') ?? '';
 
 	/** Read `id`'s rows. Dropped if the planner switched client meanwhile. */
@@ -106,6 +123,9 @@
 		state = null;
 		sendFor = null;
 		sending = false;
+		linkFor = null;
+		linkBusy = false;
+		linkErr = '';
 		picking = false;
 		pickFor = null;
 		choosing = null;
@@ -297,6 +317,62 @@
 		if (current) picking = false;
 	};
 
+	const openLink = async (a: OnboardingAction) => {
+		const gen = openGen;
+		linkErr = '';
+		linkTo = state?.contact?.email ?? '';
+		({ subject: linkSubject, html: linkHtml } = bookingLinkEmail($activeClient?.name ?? ''));
+		try {
+			linkSaved = await getBookingLink(token());
+		} catch {
+			linkSaved = null; // unreadable: the field is offered; the gateway checks it on save
+		}
+		if (gen !== openGen) return;
+		linkUrl = linkSaved ?? '';
+		linkFor = a;
+	};
+
+	const confirmLink = async () => {
+		const a = linkFor;
+		if (!a) return;
+		// As Send: the window belongs to the client it was opened for.
+		if (a.xplanClientId !== $linkableClientId || a.xplanClientId !== state?.lead.xplanClientId) {
+			linkFor = null;
+			error = 'The active client changed — nothing was sent. Open Send booking link again for this client.';
+			return;
+		}
+		const gen = openGen;
+		linkBusy = true;
+		linkErr = '';
+		if (linkUrl.trim() !== (linkSaved ?? '')) {
+			try {
+				linkSaved = await saveBookingLink(token(), linkUrl);
+				linkUrl = linkSaved ?? '';
+			} catch (e) {
+				linkErr = actionMessage(e);
+				linkBusy = false;
+				return;
+			}
+			// The save is awaited: run() mails whichever client is open now.
+			if (gen !== openGen || a.xplanClientId !== state?.lead.xplanClientId) {
+				linkFor = null;
+				linkBusy = false;
+				error = 'The active client changed — nothing was sent. Open Send booking link again for this client.';
+				return;
+			}
+		}
+		const current = await run(BOOK_STEP, 'onb_book', {
+			link: {
+				email: { subject: linkSubject, html: linkHtml },
+				...(linkTo && contact?.emails.includes(linkTo) ? { to: linkTo } : {})
+			},
+			...(pickNeedsAgain(a) ? { again: true } : {})
+		});
+		linkBusy = false;
+		if (!current) return;
+		linkFor = null;
+	};
+
 	const continueOn = async () => {
 		const id = state?.lead.xplanClientId;
 		if (!id) return;
@@ -474,6 +550,18 @@
 									{#if b.reply}· <span class={b.declined ? 'text-red-600 dark:text-red-400' : ''}>{b.reply}</span>{/if}
 								</p>
 							{/if}
+							{#if a && row.kind === 'booking' && a.status === 'sent' && linkSentOf(a)}
+								<p class="text-xs text-gray-400 mt-1">
+									Booking link sent{linkSentOf(a)?.to ? ` to ${linkSentOf(a)?.to}` : ''} — waiting for them to book
+								</p>
+							{/if}
+							{#if a && row.kind === 'booking' && bookedByClientOf(a)}
+								{@const b = bookingOf(a)}
+								<p class="text-xs text-gray-400 mt-1">
+									Booked by the client for {bookedByClientOf(a)?.label}
+									{#if b.link}· <a href={b.link} target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 dark:hover:text-gray-200">Open in {b.where} ↗</a>{/if}
+								</p>
+							{/if}
 							{#if a && row.kind === 'booking' && a.status !== 'done' && slotsOf(a).length}
 								{#if pickNeedsAgain(a)}
 									<p class="text-xs text-amber-700 dark:text-amber-300 mt-2">{SECOND_INVITE}</p>
@@ -548,6 +636,17 @@
 									class="p-1.5 rounded-lg bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 								>
 									<Calendar className="size-4" />
+								</button>
+								<button
+									on:click={() => openLink(a)}
+									disabled={!bookable || !!job || picking || linkBusy}
+									title={!bookable
+										? 'Send the welcome pack, FSG and fact find first'
+										: 'Send booking link — the client picks a time on your booking page'}
+									aria-label="Send booking link"
+									class="p-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-40 transition"
+								>
+									<Link className="size-4" />
 								</button>
 							{/if}
 						</div>
@@ -640,6 +739,85 @@
 					disabled={sending || !sendTo || !subject.trim() || !html.trim()}
 					class="text-sm px-4 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
 					>{sending ? 'Sending…' : sendLabel[sendMode]}</button
+				>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if linkFor}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true">
+		<div class="w-full max-w-xl rounded-2xl bg-white dark:bg-gray-900 shadow-xl p-5">
+			<p class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Send booking link</p>
+			<p class="text-sm mt-1 text-gray-500">
+				The client picks a time on your booking page. axi ticks this step when the meeting
+				appears in your calendar with their email.
+			</p>
+			{#if pickNeedsAgain(linkFor)}
+				<p class="text-xs text-amber-700 dark:text-amber-300 mt-2">
+					This step was already booked or sent — this emails the client again. Any invite already
+					sent is not cancelled.
+				</p>
+			{/if}
+			<label class="block mt-3 text-xs text-gray-500"
+				>Your booking page (Outlook Bookings with me or a Google appointment schedule)
+				<input
+					bind:value={linkUrl}
+					placeholder="https://outlook.office.com/bookwithme/…"
+					maxlength="500"
+					class="mt-1 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+				/>
+			</label>
+			<p class="text-xs text-gray-400 mt-1">Saved for next time. Change it later in Settings.</p>
+			<div class="text-sm mt-3 flex flex-wrap items-center gap-1">
+				<span>To</span>
+				{#if (contact?.emails ?? []).length > 1}
+					<label for="link-to" class="sr-only">Send to</label>
+					<select
+						id="link-to"
+						bind:value={linkTo}
+						class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-sm font-medium"
+					>
+						{#each contact?.emails ?? [] as addr}
+							<option value={addr}>{addr}</option>
+						{/each}
+					</select>
+				{:else}
+					<span class="font-medium">{linkTo || '(no email on file)'}</span>
+				{/if}
+			</div>
+			<label class="block mt-3 text-xs text-gray-500"
+				>Subject
+				<input
+					bind:value={linkSubject}
+					maxlength="200"
+					class="mt-1 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm"
+				/>
+			</label>
+			<label class="block mt-3 text-xs text-gray-500"
+				>Body (HTML)
+				<textarea
+					bind:value={linkHtml}
+					rows="6"
+					class="mt-1 w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-sm font-mono"
+				></textarea>
+			</label>
+			<p class="text-xs text-gray-400 mt-1">
+				A "Book a time" link to your page is added below the body when it is sent.
+			</p>
+			{#if linkErr}<p class="text-xs text-red-600 dark:text-red-400 mt-2">{linkErr}</p>{/if}
+			<div class="flex justify-end gap-2 mt-4">
+				<button
+					on:click={() => (linkFor = null)}
+					disabled={linkBusy}
+					class="text-sm px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+					>Cancel</button
+				>
+				<button
+					on:click={confirmLink}
+					disabled={linkBusy || !linkUrl.trim() || !linkTo || !linkSubject.trim()}
+					class="text-sm px-4 py-2 rounded-xl bg-black text-white dark:bg-white dark:text-black hover:opacity-90 disabled:opacity-40 transition"
+					>{linkBusy ? 'Sending…' : pickNeedsAgain(linkFor) ? 'Send again' : 'Send'}</button
 				>
 			</div>
 		</div>
