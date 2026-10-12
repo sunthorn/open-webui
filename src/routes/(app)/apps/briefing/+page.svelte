@@ -246,7 +246,10 @@
 						{#if view === 'today'}
 							<DayTimeline events={agenda.events} day={today} on:select={(e) => (selected = e.detail)} />
 						{:else}
-							<div class="rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
+							<!-- CalendarView's week grid is absolutely positioned and fills its
+							     parent, so the parent needs a height of its own: without one it
+							     collapsed to an empty strip. -->
+							<div class="h-[36rem] rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
 								<CalendarView events={weekEvents} {calendars} visibleCalendarIds={visible} view="week" currentDate={new Date()}
 									on:eventClick={(e) => (selected = agenda?.events.find((x) => x.id === e.detail.id) ?? null)} />
 							</div>
