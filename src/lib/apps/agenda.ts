@@ -302,6 +302,35 @@ export const sourceChips = (
 	return [xplan, { source: 'work', label: 'Work account', color: '#9ca3af', state: 'off', text: 'choose in Connections', action: 'connections' }];
 };
 
+// --- Week view ---------------------------------------------------------------
+// The grid (CalendarView) runs Sunday to Saturday, so the week does too.
+
+export const weekStartOf = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+
+export const shiftWeek = (start: Date, weeks: number): Date =>
+	new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7 * weeks);
+
+export const weekWindow = (start: Date): { from: string; to: string } => ({
+	from: isoDate(start),
+	to: isoDate(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6))
+});
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "11 – 17 Oct 2026"; the first month or year is named only when it differs. */
+export const weekLabel = (start: Date): string => {
+	const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+	const tail = `${end.getDate()} ${MONTHS[end.getMonth()]} ${end.getFullYear()}`;
+	if (start.getFullYear() !== end.getFullYear()) return `${start.getDate()} ${MONTHS[start.getMonth()]} ${start.getFullYear()} – ${tail}`;
+	if (start.getMonth() !== end.getMonth()) return `${start.getDate()} ${MONTHS[start.getMonth()]} – ${tail}`;
+	return `${start.getDate()} – ${tail}`;
+};
+
+/** The hour the week grid opens at: Today's default start, or sooner when a
+ *  timed event in the week starts before it. */
+export const weekScrollHour = (events: AgendaEvent[]): number =>
+	events.reduce((h, e) => (e.allDay ? h : Math.min(h, Math.floor(hourOf(e.startAt)))), DEFAULT_START);
+
 /** The agent's narrative is one point per line; a bullet it wrote itself is dropped. */
 export const narrativePoints = (text: string): string[] =>
 	text.split('\n').map((l) => l.trim().replace(/^(?:[-•*]|\d+[.)])\s+/, '')).filter(Boolean);

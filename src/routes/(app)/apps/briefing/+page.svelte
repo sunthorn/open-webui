@@ -15,7 +15,8 @@
 	} from '$lib/apis/gateway/agenda';
 	import {
 		fallbackAttention, sourceCalendars, toCalendarEvents,
-		snoozeUntil, describeChange, applyChange, type AgendaChange, narrativePoints
+		snoozeUntil, describeChange, applyChange, type AgendaChange,
+		weekStartOf, shiftWeek, weekWindow, weekLabel, weekScrollHour, narrativePoints
 	} from '$lib/apps/agenda';
 	import ClientPicker from '$lib/components/apps/ClientPicker.svelte';
 	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
@@ -37,6 +38,37 @@
 	let err = '';
 	let view: 'today' | 'week' = 'today';
 	let selected: AgendaEvent | null = null;
+
+	// Week view has its own fetch for whichever week is shown (Sunday to
+	// Saturday, as the grid draws it); the page's agenda covers today + 7 days.
+	let weekStart = weekStartOf(new Date());
+	let weekAgenda: AgendaResponse | null = null;
+	let weekLoading = false;
+	let weekError = '';
+	let weekSeq = 0;
+	const loadWeek = async (refresh = false) => {
+		const seq = ++weekSeq; // a newer week's answer wins over a slower, older one
+		weekLoading = true;
+		weekError = '';
+		const { from, to } = weekWindow(weekStart);
+		try {
+			const a = await getAgenda(token(), from, to, refresh);
+			if (seq === weekSeq) weekAgenda = a;
+		} catch (e: any) {
+			if (seq === weekSeq) weekError = e?.message ?? 'Could not load this week';
+		} finally {
+			if (seq === weekSeq) weekLoading = false;
+		}
+	};
+	const goWeek = (weeks: number | null) => {
+		weekStart = weeks === null ? weekStartOf(new Date()) : shiftWeek(weekStart, weeks);
+		weekAgenda = null;
+		void loadWeek();
+	};
+	const showWeek = () => {
+		view = 'week';
+		if (!weekAgenda) void loadWeek();
+	};
 	let greeting = 'Hello';
 	let busyId: string | null = null;
 	let assigning: AgendaTask | AgendaEvent | null = null;
@@ -44,14 +76,20 @@
 	$: xplanLocked = agenda?.sources.xplan?.status === 'locked';
 	$: sourceErrors = Object.entries(agenda?.sources ?? {}).filter(([, s]) => s?.status === 'error') as [string, { message?: string }][];
 	$: attention = agenda ? fallbackAttention(agenda.tasks, today) : { overdue: 0, dueToday: [] };
-	$: weekEvents = agenda ? toCalendarEvents(agenda.events) : [];
+	$: weekEvents = weekAgenda ? toCalendarEvents(weekAgenda.events) : [];
+	$: weekHour = weekScrollHour(weekAgenda?.events ?? []);
+	$: thisWeek = isoDate(weekStart) === isoDate(weekStartOf(new Date()));
 	const calendars = sourceCalendars();
 	const visible = new Set(calendars.map((c) => c.id));
 
 	// Keeps the open event panel showing the current agenda's copy of the
 	// selected event — after a write, a reload, or a rollback — instead of a
 	// stale snapshot from before the change.
-	const resync = () => { if (selected && agenda) selected = agenda.events.find((e) => e.id === selected!.id) ?? selected; };
+	const resync = () => {
+		if (!selected) return;
+		const id = selected.id;
+		selected = agenda?.events.find((e) => e.id === id) ?? weekAgenda?.events.find((e) => e.id === id) ?? selected;
+	};
 
 	const load = async (refresh = false) => {
 		loading = true;
@@ -62,6 +100,7 @@
 				getConnectors(token()).catch(() => null),
 				getBriefing(token()).catch(() => null)
 			]);
+			if (weekAgenda || view === 'week') await loadWeek(refresh);
 			resync();
 		} catch (e: any) {
 			loadError = e?.message ?? 'Could not load your agenda';
@@ -100,14 +139,17 @@
 		if (!agenda || !confirm(describeChange(c))) return;
 		err = '';
 		const before = agenda;
+		const weekBefore = weekAgenda;
 		busyId = itemOf(c).id;
 		agenda = applyChange(agenda, c);
+		if (weekAgenda) weekAgenda = applyChange(weekAgenda, c);
 		resync();
 		try {
 			await post(c);
 			await load(true);
 		} catch (e: any) {
 			agenda = before;
+			weekAgenda = weekBefore;
 			resync();
 			err = e?.message ?? 'The change did not go through';
 		} finally {
@@ -240,7 +282,7 @@
 					<h2 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Calendar</h2>
 					<div class="text-xs rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
 						<button class="px-3 py-1 {view === 'today' ? 'bg-gray-100 dark:bg-gray-800 font-medium' : ''}" on:click={() => (view = 'today')}>Today</button>
-						<button class="px-3 py-1 {view === 'week' ? 'bg-gray-100 dark:bg-gray-800 font-medium' : ''}" on:click={() => (view = 'week')}>Week</button>
+						<button class="px-3 py-1 {view === 'week' ? 'bg-gray-100 dark:bg-gray-800 font-medium' : ''}" on:click={showWeek}>Week</button>
 					</div>
 				</div>
 				<div class="grid gap-4 {selected ? 'md:grid-cols-[1fr_18rem]' : ''}">
@@ -251,9 +293,20 @@
 							<!-- CalendarView's week grid is absolutely positioned and fills its
 							     parent, so the parent needs a height of its own: without one it
 							     collapsed to an empty strip. -->
+							<div class="flex items-center gap-2 mb-2 text-sm">
+								<button class="px-2 py-0.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Previous week" on:click={() => goWeek(-1)}>‹</button>
+								<button class="px-2 py-0.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Next week" on:click={() => goWeek(1)}>›</button>
+								<span class="font-medium">{weekLabel(weekStart)}</span>
+								{#if !thisWeek}
+									<button class="text-xs px-2 py-0.5 rounded-md border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800" on:click={() => goWeek(null)}>This week</button>
+								{/if}
+								{#if weekLoading}<span class="text-xs text-gray-400">loading…</span>{/if}
+								{#if weekError}<span class="text-xs text-red-500">{weekError} — <button class="underline" on:click={() => loadWeek()}>try again</button></span>{/if}
+							</div>
 							<div class="h-[36rem] rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
-								<CalendarView events={weekEvents} {calendars} visibleCalendarIds={visible} view="week" currentDate={new Date()}
-									on:eventClick={(e) => (selected = agenda?.events.find((x) => x.id === e.detail.id) ?? null)} />
+								<CalendarView events={weekEvents} {calendars} visibleCalendarIds={visible} view="week" currentDate={weekStart}
+									scrollToHour={weekHour}
+									on:eventClick={(e) => (selected = weekAgenda?.events.find((x) => x.id === e.detail.id) ?? null)} />
 							</div>
 						{/if}
 					</div>

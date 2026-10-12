@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	groupTasks, timelineRange, placeEvent, eventsOn, allDayOn, toCalendarEvents,
 	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel, sourceChip, sourceChips,
-	narrativePoints
+	weekStartOf, shiftWeek, weekWindow, weekLabel, weekScrollHour, narrativePoints
 } from './agenda';
 import type { AgendaEvent, AgendaTask, AgendaResponse } from '$lib/apis/gateway/agenda';
 
@@ -286,6 +286,37 @@ describe('sourceChip', () => {
 		const off = sourceChip('xplan', {}, null, fmt);
 		expect(off).toMatchObject({ state: 'off', text: 'not read yet' });
 		expect(off.action).toBeUndefined();
+	});
+});
+
+describe('week navigation', () => {
+	it('a week starts on the Sunday at local midnight, as the grid does', () => {
+		const s = weekStartOf(new Date(2026, 9, 13, 6, 39));
+		expect([s.getFullYear(), s.getMonth(), s.getDate(), s.getDay(), s.getHours()]).toEqual([2026, 9, 11, 0, 0]);
+		expect(weekStartOf(new Date(2026, 9, 11, 23, 0)).getDate()).toBe(11);
+	});
+
+	it('steps whole weeks, across a month end', () => {
+		const back = shiftWeek(new Date(2026, 9, 4), -1);
+		expect([back.getMonth(), back.getDate()]).toEqual([8, 27]);
+		expect(shiftWeek(new Date(2026, 9, 11), 1).getDate()).toBe(18);
+	});
+
+	it('asks the gateway for Sunday to Saturday', () => {
+		expect(weekWindow(new Date(2026, 9, 11))).toEqual({ from: '2026-10-11', to: '2026-10-17' });
+	});
+
+	it('labels the week compactly, naming a second month or year only when it changes', () => {
+		expect(weekLabel(new Date(2026, 9, 11))).toBe('11 – 17 Oct 2026');
+		expect(weekLabel(new Date(2026, 8, 27))).toBe('27 Sep – 3 Oct 2026');
+		expect(weekLabel(new Date(2026, 11, 27))).toBe('27 Dec 2026 – 2 Jan 2027');
+	});
+
+	it('scrolls to 7 AM, or to the week\'s earliest timed event if sooner', () => {
+		expect(weekScrollHour([])).toBe(7);
+		expect(weekScrollHour([event({ startAt: new Date(2026, 9, 14, 9).toISOString() })])).toBe(7);
+		expect(weekScrollHour([event({ startAt: new Date(2026, 9, 14, 6, 30).toISOString() })])).toBe(6);
+		expect(weekScrollHour([event({ allDay: true, startAt: '2026-10-14' })])).toBe(7);
 	});
 });
 

@@ -11,6 +11,8 @@
 	export let visibleCalendarIds: Set<string> = new Set();
 	export let view: 'month' | 'week' | 'day' = 'month';
 	export let currentDate: Date = new Date();
+	/** Week view: the hour row to scroll to, kept in step as it changes (axi). */
+	export let scrollToHour: number | null = null;
 
 	const NS = 1_000_000;
 	const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -76,6 +78,13 @@
 	})();
 
 	$: hours = Array.from({ length: 24 }, (_, i) => i);
+
+	let weekScroller: HTMLDivElement | undefined;
+	// A few px above the row, so its hour label (drawn above the line) shows.
+	$: if (weekScroller && scrollToHour !== null) {
+		const row = weekScroller.children[scrollToHour] as HTMLElement | undefined;
+		if (row) weekScroller.scrollTop = Math.max(0, row.offsetTop - weekScroller.offsetTop - 8);
+	}
 
 	function isToday(d: Date): boolean {
 		return d.toDateString() === new Date().toDateString();
@@ -234,7 +243,7 @@
 							{/each}
 						</div>
 
-						<div class="flex-1 overflow-y-auto">
+						<div class="flex-1 overflow-y-auto" bind:this={weekScroller}>
 							{#each hours as hour}
 								<div
 									class="grid grid-cols-[52px_repeat(7,1fr)] min-h-[52px] {hour > 0
