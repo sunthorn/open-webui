@@ -301,3 +301,7 @@ export const sourceChips = (
 	if (work.length) return [xplan, ...work];
 	return [xplan, { source: 'work', label: 'Work account', color: '#9ca3af', state: 'off', text: 'choose in Connections', action: 'connections' }];
 };
+
+/** The agent's narrative is one point per line; a bullet it wrote itself is dropped. */
+export const narrativePoints = (text: string): string[] =>
+	text.split('\n').map((l) => l.trim().replace(/^(?:[-•*]|\d+[.)])\s+/, '')).filter(Boolean);

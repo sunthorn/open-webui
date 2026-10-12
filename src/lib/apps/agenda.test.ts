@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
 	groupTasks, timelineRange, placeEvent, eventsOn, allDayOn, toCalendarEvents,
-	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel, sourceChip, sourceChips
+	sourceCalendars, fallbackAttention, localDay, SOURCE_META, snoozeUntil, describeChange, applyChange, toLocalInput, moveWindow, clientLabel, sourceChip, sourceChips,
+	narrativePoints
 } from './agenda';
 import type { AgendaEvent, AgendaTask, AgendaResponse } from '$lib/apis/gateway/agenda';
 
@@ -285,5 +286,15 @@ describe('sourceChip', () => {
 		const off = sourceChip('xplan', {}, null, fmt);
 		expect(off).toMatchObject({ state: 'off', text: 'not read yet' });
 		expect(off.action).toBeUndefined();
+	});
+});
+
+describe('narrativePoints', () => {
+	it('one point per line, blank lines dropped', () => {
+		expect(narrativePoints('First.\n\n  Second.  \n')).toEqual(['First.', 'Second.']);
+	});
+
+	it('drops a bullet the model wrote itself', () => {
+		expect(narrativePoints('- one\n• two\n* three\n1. four')).toEqual(['one', 'two', 'three', 'four']);
 	});
 });

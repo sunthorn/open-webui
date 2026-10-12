@@ -15,7 +15,7 @@
 	} from '$lib/apis/gateway/agenda';
 	import {
 		fallbackAttention, sourceCalendars, toCalendarEvents,
-		snoozeUntil, describeChange, applyChange, type AgendaChange
+		snoozeUntil, describeChange, applyChange, type AgendaChange, narrativePoints
 	} from '$lib/apps/agenda';
 	import ClientPicker from '$lib/components/apps/ClientPicker.svelte';
 	import { syncJobs, syncJobsError, startJob, stopJob, runningJob } from '$lib/stores/syncJobs';
@@ -208,7 +208,9 @@
 					{#if briefingJob}<span class="text-xs text-gray-400">{briefingJob.progress || 'the agent is re-reading…'}</span>{/if}
 				</div>
 				{#if briefing?.narrative}
-					<div class="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 text-sm whitespace-pre-line">{briefing.narrative}</div>
+					<ul class="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 pl-8 text-sm list-disc space-y-1">
+						{#each narrativePoints(briefing.narrative) as point}<li>{point}</li>{/each}
+					</ul>
 					<p class="text-xs text-gray-400 mt-1">the agent's view, from your calendars and XPLAN · compiled {compiledLabel(briefing.compiledAt)} · updates when you re-read XPLAN</p>
 				{:else if attention.overdue || attention.dueToday.length}
 					<ul class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
