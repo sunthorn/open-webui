@@ -21,8 +21,17 @@ import {
 	sendsAgain,
 	pickNeedsAgain,
 	actionMessage,
-	jobRefusal
+	jobRefusal,
+	hourSlotStart,
+	hourBlock,
+	isHourBookable,
+	calendarLinksFor,
+	isSlotBusy,
+	hourRangeLabel,
+	OUTLOOK_CALENDAR,
+	GOOGLE_CALENDAR
 } from './onboarding';
+import type { AgendaEvent } from '$lib/apis/gateway/agenda';
 import { GatewayError } from '$lib/apis/gateway';
 import type { OnboardingAction, OnboardingState } from '$lib/apis/gateway/onboarding';
 import { EMPTY_SNAPSHOT } from '$lib/apis/gateway/jobs';
@@ -235,7 +244,7 @@ describe('Stage 1 page actions', () => {
 
 	it('picking a slot on a booked row needs again', () => {
 		expect(pickNeedsAgain(a(BOOK_STEP, 'pending'))).toBe(false);
-		expect(pickNeedsAgain(a(BOOK_STEP, 'failed', { error: { code: 'no_slots' } }))).toBe(false);
+		expect(pickNeedsAgain(a(BOOK_STEP, 'failed', { error: { code: 'slot_busy' } }))).toBe(false);
 		expect(pickNeedsAgain(a(BOOK_STEP, 'sent'))).toBe(true);
 		expect(pickNeedsAgain(a(BOOK_STEP, 'done'))).toBe(true);
 		expect(pickNeedsAgain(a(BOOK_STEP, 'failed', { error: { code: 'sent_unrecorded' } }))).toBe(true);
@@ -244,7 +253,7 @@ describe('Stage 1 page actions', () => {
 	it('an unticked meeting that still holds its event counts as booked', () => {
 		const row = { ...a(BOOK_STEP, 'pending'), eventRef: 'ev1' } as OnboardingAction;
 		expect(pickNeedsAgain(row)).toBe(true);
-		const failed = { ...a(BOOK_STEP, 'failed', { error: { code: 'no_slots' } }), eventRef: 'ev1' };
+		const failed = { ...a(BOOK_STEP, 'failed', { error: { code: 'slot_busy' } }), eventRef: 'ev1' };
 		expect(pickNeedsAgain(failed as OnboardingAction)).toBe(true);
 	});
 
@@ -279,10 +288,10 @@ describe('job-level refusals', () => {
 	it('maps the lock failure to busy and passes other text through', () => {
 		const s = snap({
 			onb_send: job('j1', 'error', 'Could not take the send lock — try again in a moment'),
-			onb_book: job('j2', 'error', 'That slot is no longer offered — pick again')
+			onb_book: job('j2', 'error', 'That hour is busy in your calendar — free it there first')
 		});
 		expect(jobRefusal(s, 'j1')).toBe('Another send or booking for this step is already running');
-		expect(jobRefusal(s, 'j2')).toBe('That slot is no longer offered — pick again');
+		expect(jobRefusal(s, 'j2')).toBe('That hour is busy in your calendar — free it there first');
 	});
 });
 
@@ -338,5 +347,100 @@ describe('the booking link', () => {
 		expect(bookingLinkEmail('').html).toContain('<p>Hi there,</p>');
 		expect(bookingLinkEmail('<b>x</b>, <i>').html).not.toContain('<b>');
 		expect(bookingLinkEmail('Smith, John').subject).toBe('Book your discovery meeting');
+	});
+});
+
+describe('booking an hour', () => {
+	const now = new Date(2026, 9, 13, 10, 30); // Tue 13 Oct 2026, 10:30 local
+	const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m);
+	const ev = (startAt: string, endAt: string, extra: Partial<AgendaEvent> = {}): AgendaEvent => ({
+		id: startAt,
+		source: 'm365',
+		sourceId: 'x',
+		title: 'Busy',
+		startAt,
+		endAt,
+		allDay: false,
+		attendees: [],
+		href: '',
+		writable: false,
+		...extra
+	});
+	const iso = (d: Date) => d.toISOString();
+
+	it('hourSlotStart is the hour on the wall clock with the local offset', () => {
+		const d = at(15, 9, 42);
+		const s = hourSlotStart(d);
+		expect(s).toMatch(/^2026-10-15T09:00:00[+-]\d{2}:\d{2}$/);
+		expect(Date.parse(s)).toBe(at(15, 9).getTime());
+		const off = -at(15, 9).getTimezoneOffset();
+		const sign = off < 0 ? '-' : '+';
+		const hh = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0');
+		const mm = String(Math.abs(off) % 60).padStart(2, '0');
+		expect(s.endsWith(`${sign}${hh}:${mm}`)).toBe(true);
+	});
+
+	it('a free future hour is bookable', () => {
+		expect(isHourBookable(at(15, 9), [], now)).toBe(true);
+		expect(hourBlock(at(15, 9), [], now)).toBeNull();
+	});
+
+	it('an hour that has started or passed is not', () => {
+		expect(hourBlock(at(13, 10), [], now)).toEqual({ kind: 'past' });
+		expect(hourBlock(at(12, 15), [], now)).toEqual({ kind: 'past' });
+		expect(isHourBookable(at(13, 11), [], now)).toBe(true);
+	});
+
+	it('an hour past the 90-day horizon is not', () => {
+		expect(hourBlock(new Date(2027, 0, 20, 9), [], now)).toEqual({ kind: 'too_far' });
+	});
+
+	it('any overlap with a timed event blocks the hour', () => {
+		const e = ev(iso(at(15, 9, 30)), iso(at(15, 10, 30)));
+		expect(hourBlock(at(15, 9), [e], now)).toEqual({ kind: 'busy', events: [e] });
+		expect(isHourBookable(at(15, 10), [e], now)).toBe(false);
+		const long = ev(iso(at(15, 8)), iso(at(15, 12)));
+		expect(isHourBookable(at(15, 10), [long], now)).toBe(false);
+	});
+
+	it('events that only touch the edges do not', () => {
+		const before = ev(iso(at(15, 8)), iso(at(15, 9)));
+		const after = ev(iso(at(15, 10)), iso(at(15, 11)));
+		expect(isHourBookable(at(15, 9), [before, after], now)).toBe(true);
+	});
+
+	it('a zero-length event holds the hour it sits in', () => {
+		const point = ev(iso(at(15, 9)), '');
+		expect(isHourBookable(at(15, 9), [point], now)).toBe(false);
+		expect(isHourBookable(at(15, 8), [point], now)).toBe(true);
+	});
+
+	it('an all-day event blocks every hour of its days, and only those', () => {
+		const leave = ev('2026-10-15', '2026-10-16', { allDay: true, source: 'google' });
+		expect(isHourBookable(at(15, 9), [leave], now)).toBe(false);
+		expect(isHourBookable(at(16, 17), [leave], now)).toBe(false);
+		expect(isHourBookable(at(17, 9), [leave], now)).toBe(true);
+	});
+
+	it('links to the busy events’ calendars, both when unsure', () => {
+		expect(calendarLinksFor(['m365'])).toEqual([OUTLOOK_CALENDAR]);
+		expect(calendarLinksFor(['google', 'google'])).toEqual([GOOGLE_CALENDAR]);
+		expect(calendarLinksFor(['m365', 'google'])).toEqual([OUTLOOK_CALENDAR, GOOGLE_CALENDAR]);
+		expect(calendarLinksFor(['xplan'])).toEqual([OUTLOOK_CALENDAR, GOOGLE_CALENDAR]);
+		expect(calendarLinksFor([])).toEqual([OUTLOOK_CALENDAR, GOOGLE_CALENDAR]);
+	});
+
+	it('spots the slot_busy refusal by its text', () => {
+		expect(isSlotBusy('That hour is busy in your calendar — free it there first')).toBe(true);
+		expect(isSlotBusy('Already booked')).toBe(false);
+		expect(isSlotBusy(null)).toBe(false);
+	});
+
+	it('labels the hour as a range in the planner’s zone', () => {
+		const tz = 'Australia/Sydney';
+		expect(hourRangeLabel(new Date('2026-10-15T09:00:00+11:00'), tz)).toBe('Thu 15 Oct, 9:00–10:00 AM');
+		expect(hourRangeLabel(new Date('2026-10-15T11:00:00+11:00'), tz)).toBe(
+			'Thu 15 Oct, 11:00 AM–12:00 PM'
+		);
 	});
 });

@@ -52,7 +52,7 @@
 		bookedByClientOf,
 		bookingLinkEmail,
 		linkSentOf,
-		slotsOf,
+		hourSlotStart,
 		type SendMode
 	} from '$lib/apps/onboarding';
 	import { syncJobs, refreshJobs, startJobPolling } from '$lib/stores/syncJobs';
@@ -62,6 +62,7 @@
 	import ArrowPath from '$lib/components/icons/ArrowPath.svelte';
 	import Calendar from '$lib/components/icons/Calendar.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
+	import BookMeetingWindow from '$lib/components/apps/BookMeetingWindow.svelte';
 
 	let state: OnboardingState | null = null;
 	let loading = true;
@@ -80,8 +81,12 @@
 	let subject = '';
 	let html = '';
 	let sending = false;
-	// A slot pick in flight
-	let picking = false;
+	// Book discovery meeting window: the row it is for, the onb_book job it
+	// queued (the window waits for it), and that job's refusal.
+	let bookFor: OnboardingAction | null = null;
+	let bookJob: string | null = null;
+	let bookSending = false;
+	let bookErr = '';
 	// Template picker: the row asking, its choices, the one ticked. `choosing`
 	// is the row whose list is being fetched.
 	let pickFor: Step | null = null;
@@ -126,7 +131,10 @@
 		linkFor = null;
 		linkBusy = false;
 		linkErr = '';
-		picking = false;
+		bookFor = null;
+		bookJob = null;
+		bookSending = false;
+		bookErr = '';
 		pickFor = null;
 		choosing = null;
 		error = '';
@@ -149,20 +157,26 @@
 		}
 	};
 
-	/** Queue a job. False when the page moved to another client meanwhile. */
+	/**
+	 * Queue a job. False when the page moved to another client meanwhile;
+	 * else the queued job's id, or null and the gateway's refusal.
+	 */
 	const run = async (
 		step: Step,
 		kind: OnboardingJobKind,
 		args: Record<string, unknown> = {}
-	): Promise<boolean> => {
+	): Promise<false | { jobId: string | null; refused: string }> => {
 		const gen = openGen;
 		const id = state?.lead.xplanClientId;
 		if (!id) return false;
+		let jobId: string | null = null;
+		let refused = '';
 		try {
-			await runAction(token(), id, step, kind, args);
+			jobId = (await runAction(token(), id, step, kind, args)).jobId;
 			if (gen === openGen) error = '';
 		} catch (e) {
-			if (gen === openGen) error = actionMessage(e);
+			refused = actionMessage(e);
+			if (gen === openGen) error = refused;
 		}
 		if (gen !== openGen) return false;
 		// Jobs first: a row reloaded as `drafting` against a snapshot without
@@ -170,7 +184,7 @@
 		await refreshJobs(token());
 		await load(id, gen);
 		void startJobPolling(token());
-		return gen === openGen;
+		return gen === openGen && { jobId, refused };
 	};
 
 	/**
@@ -236,8 +250,14 @@
 				.map((j) => j.id)
 		);
 		const gone = [...seen].filter((id) => !mine.has(id));
+		// The booking window's own job: its refusal shows in the window, not
+		// on the page (confirmBook settles one that finished before it looked).
+		if (bookJob && gone.includes(bookJob)) settleBook(bookJob);
 		if (loadedFor && gone.length) {
-			const refusal = gone.map((id) => jobRefusal($syncJobs, id)).find((m) => m);
+			const refusal = gone
+				.filter((id) => !(bookFor && isBookJob(id)))
+				.map((id) => jobRefusal($syncJobs, id))
+				.find((m) => m);
 			const gen = openGen;
 			void load(loadedFor, gen).then(() => {
 				if (refusal && gen === openGen && !rowSays(refusal)) error = refusal;
@@ -307,14 +327,60 @@
 		sendFor = null;
 	};
 
-	const pickSlot = async (a: OnboardingAction, slot: { start: string }) => {
-		if (a.xplanClientId !== state?.lead.xplanClientId) return;
-		picking = true;
+	const openBook = (a: OnboardingAction) => {
+		bookErr = '';
+		bookJob = null;
+		bookSending = false;
+		bookFor = a;
+	};
+
+	// Closing while the job runs is allowed (a dead worker must not trap the
+	// window); its outcome then shows on the page like any other job's.
+	const closeBook = () => {
+		bookFor = null;
+		bookJob = null;
+		bookSending = false;
+	};
+
+	const isBookJob = (id: string) =>
+		Object.values($syncJobs.last).some((j) => j?.id === id && j.kind === 'onb_book');
+
+	/** The window's job finished: close on success, show its refusal otherwise. */
+	const settleBook = (jobId: string) => {
+		bookJob = null;
+		bookSending = false;
+		const refusal = jobRefusal($syncJobs, jobId);
+		if (refusal) bookErr = refusal;
+		else bookFor = null;
+	};
+
+	const confirmBook = async (hour: Date) => {
+		const a = bookFor;
+		if (!a) return;
+		// As Send: the window belongs to the client it was opened for.
+		if (a.xplanClientId !== $linkableClientId || a.xplanClientId !== state?.lead.xplanClientId) {
+			bookFor = null;
+			error = 'The active client changed — nothing was sent. Open Book discovery meeting again for this client.';
+			return;
+		}
+		bookSending = true;
+		bookErr = '';
 		const current = await run(BOOK_STEP, 'onb_book', {
-			slot: { start: slot.start },
+			slot: { start: hourSlotStart(hour) },
 			...(pickNeedsAgain(a) ? { again: true } : {})
 		});
-		if (current) picking = false;
+		// A switch meanwhile already reset the window for the new client.
+		if (!current) return;
+		if (!current.jobId) {
+			// The gateway refused before queueing: say so in the window.
+			bookErr = current.refused || 'The booking was not queued — try again.';
+			error = '';
+			bookSending = false;
+			return;
+		}
+		// Waits for the job; one that already finished is settled now.
+		if ($syncJobs.running.some((j) => j.id === current.jobId)) bookJob = current.jobId;
+		else settleBook(current.jobId);
 	};
 
 	const openLink = async (a: OnboardingAction) => {
@@ -394,8 +460,7 @@
 		unrecorded: 'Send again'
 	};
 
-	const bookLabel = (a: OnboardingAction): string =>
-		slotsOf(a).length ? 'Other times' : pickNeedsAgain(a) ? 'Book again' : 'Book';
+	const bookLabel = (a: OnboardingAction): string => (pickNeedsAgain(a) ? 'Book again' : 'Book');
 
 	$: actions = state?.actions ?? [];
 	$: map = byStep(actions);
@@ -562,22 +627,6 @@
 									{#if b.link}· <a href={b.link} target="_blank" rel="noopener noreferrer" class="underline hover:text-gray-600 dark:hover:text-gray-200">Open in {b.where} ↗</a>{/if}
 								</p>
 							{/if}
-							{#if a && row.kind === 'booking' && a.status !== 'done' && slotsOf(a).length}
-								{#if pickNeedsAgain(a)}
-									<p class="text-xs text-amber-700 dark:text-amber-300 mt-2">{SECOND_INVITE}</p>
-								{/if}
-								<div class="flex flex-wrap gap-2 mt-2">
-									{#each slotsOf(a) as s}
-										<button
-											on:click={() => pickSlot(a, s)}
-											disabled={picking || !!job}
-											class="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-850 disabled:opacity-50 transition"
-										>
-											{s.label}
-										</button>
-									{/each}
-								</div>
-							{/if}
 						</div>
 						<div class="shrink-0 flex items-center gap-1.5">
 							{#if a && row.kind === 'document'}
@@ -625,8 +674,8 @@
 								{/if}
 							{:else if a && row.kind === 'booking' && a.status !== 'done'}
 								<button
-									on:click={() => run(BOOK_STEP, 'onb_book')}
-									disabled={!bookable || !!job || picking}
+									on:click={() => openBook(a)}
+									disabled={!bookable || !!job || bookSending}
 									title={!bookable
 										? 'Send the welcome pack, FSG and fact find first'
 										: pickNeedsAgain(a)
@@ -639,7 +688,7 @@
 								</button>
 								<button
 									on:click={() => openLink(a)}
-									disabled={!bookable || !!job || picking || linkBusy}
+									disabled={!bookable || !!job || bookSending || linkBusy}
 									title={!bookable
 										? 'Send the welcome pack, FSG and fact find first'
 										: 'Send booking link — the client picks a time on your booking page'}
@@ -832,6 +881,19 @@
 			</div>
 		</div>
 	</div>
+{/if}
+
+{#if bookFor}
+	<BookMeetingWindow
+		needsAgain={pickNeedsAgain(bookFor)}
+		againWarning={SECOND_INVITE}
+		email={contact?.email ?? null}
+		sending={bookSending}
+		error={bookErr}
+		on:pick={() => (bookErr = '')}
+		on:send={(e) => confirmBook(e.detail.hour)}
+		on:close={closeBook}
+	/>
 {/if}
 
 {#if pickFor}

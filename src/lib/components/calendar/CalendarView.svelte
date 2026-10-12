@@ -13,6 +13,8 @@
 	export let currentDate: Date = new Date();
 	/** Week view: the hour row to scroll to, kept in step as it changes (axi). */
 	export let scrollToHour: number | null = null;
+	/** Week view: the start (ms) of an hour to outline as picked (axi). */
+	export let pickedHour: number | null = null;
 
 	const NS = 1_000_000;
 	const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -260,6 +262,9 @@
 										<button
 											class="px-0.5 py-0.5 {day.getDay() > 0
 												? 'border-l border-gray-100/15 dark:border-gray-850/15'
+												: ''} {pickedHour !== null &&
+											pickedHour === new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime()
+												? 'ring-2 ring-inset ring-blue-500 bg-blue-50/60 dark:bg-blue-900/20'
 												: ''} hover:bg-gray-50/50 dark:hover:bg-gray-850/20 transition cursor-pointer min-w-0 flex flex-col"
 											on:click={() => handleHourClick(day, hour)}
 										>

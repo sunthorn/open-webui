@@ -3,6 +3,9 @@
 // Spec: docs/superpowers/specs/2026-10-08-client-onboarding-design.md §5.4.
 import { GatewayError } from '$lib/apis/gateway';
 import type { JobsSnapshot, SyncJob } from '$lib/apis/gateway/jobs';
+import type { AgendaEvent, AgendaSource } from '$lib/apis/gateway/agenda';
+import { isoDate } from '$lib/apis/gateway/agenda';
+import { allDayOn } from '$lib/apps/agenda';
 import type {
 	ActionStatus,
 	OnboardingAction,
@@ -45,7 +48,7 @@ export const ENQUIRY_ROWS: EnquiryRow[] = [
 		title: 'Book Discovery Meeting',
 		kind: 'booking',
 		detail:
-			'Three free hours from your calendar; the invite goes to the client. Done when they accept.'
+			'Pick an hour on your calendar; the invite goes to the client. Done when they accept.'
 	}
 ];
 
@@ -127,9 +130,6 @@ export const emailOf = (a: OnboardingAction) =>
 
 export const errorOf = (a: OnboardingAction) =>
 	(a.detail?.error as { code?: string; message?: string } | undefined) ?? null;
-
-export const slotsOf = (a: OnboardingAction) =>
-	(a.detail?.slots as { start: string; end: string; label: string }[] | undefined) ?? [];
 
 export const slotOf = (a: OnboardingAction) =>
 	(a.detail?.slot as { start: string; end: string; label: string } | undefined) ?? null;
@@ -261,10 +261,8 @@ export const sendModeOf = (a: OnboardingAction): SendMode | null => {
 export const sendsAgain = (mode: SendMode): boolean => mode === 'again' || mode === 'unrecorded';
 
 /**
- * A slot pick on a booked row (sent/done, or booked-but-unrecorded) must say
- * `again`: booking clears the offered slots, so "Book again" first proposes
- * fresh ones without a slot, and the pick is the explicit second invite.
- * A row holding an eventRef has an invite out whatever its status (an
+ * A booking on a booked row (sent/done, or booked-but-unrecorded) must say
+ * `again`: it is the explicit second invite. A row holding an eventRef has an invite out whatever its status (an
  * untick keeps it), so it counts as booked too.
  */
 export const pickNeedsAgain = (a: OnboardingAction): boolean =>
@@ -272,6 +270,102 @@ export const pickNeedsAgain = (a: OnboardingAction): boolean =>
 	a.status === 'sent' ||
 	a.status === 'done' ||
 	(a.status === 'failed' && errorOf(a)?.code === 'sent_unrecorded');
+
+// --- booking an hour (Book discovery meeting window) ---
+
+const HOUR = 3_600_000;
+/** How far ahead onb_book takes a slot. */
+const BOOK_AHEAD_DAYS = 90;
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * The hour `d` falls in, as onb_book's `slot.start`: local wall time with the
+ * browser's offset ("2026-10-15T09:00:00+11:00"), minutes dropped.
+ */
+export const hourSlotStart = (d: Date): string => {
+	const h = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours());
+	const off = -h.getTimezoneOffset();
+	const sign = off < 0 ? '-' : '+';
+	const abs = Math.abs(off);
+	return (
+		`${h.getFullYear()}-${pad(h.getMonth() + 1)}-${pad(h.getDate())}T${pad(h.getHours())}:00:00` +
+		`${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+	);
+};
+
+/** Why an hour cannot be booked; null when it can. */
+export type HourBlock =
+	| { kind: 'past' }
+	| { kind: 'too_far' }
+	| { kind: 'busy'; events: AgendaEvent[] };
+
+/**
+ * An hour is not bookable when it has started, is past onb_book's horizon,
+ * overlaps a timed event, or falls on a day an all-day event covers. Edges
+ * that only touch (an event ending at 9:00 against 9–10) do not overlap.
+ */
+export const hourBlock = (hour: Date, events: AgendaEvent[], now: Date): HourBlock | null => {
+	const start = hour.getTime();
+	const end = start + HOUR;
+	if (start <= now.getTime()) return { kind: 'past' };
+	if (start > now.getTime() + BOOK_AHEAD_DAYS * 24 * HOUR) return { kind: 'too_far' };
+	const busy = [
+		...allDayOn(events, isoDate(hour)),
+		...events.filter((e) => {
+			if (e.allDay) return false;
+			const s = Date.parse(e.startAt);
+			const en = Math.max(s, Date.parse(e.endAt || e.startAt));
+			// A zero-length event still holds the hour it sits in.
+			return s < end && (en > start || s >= start);
+		})
+	];
+	return busy.length ? { kind: 'busy', events: busy } : null;
+};
+
+export const isHourBookable = (hour: Date, events: AgendaEvent[], now: Date): boolean =>
+	hourBlock(hour, events, now) === null;
+
+export const OUTLOOK_CALENDAR = { label: 'Open Outlook calendar', href: 'https://outlook.office.com/calendar/' };
+export const GOOGLE_CALENDAR = { label: 'Open Google Calendar', href: 'https://calendar.google.com/' };
+
+/** Where to free a busy hour: the busy events' own calendars, or both when unsure. */
+export const calendarLinksFor = (sources: (AgendaSource | string)[]) => {
+	const m365 = sources.includes('m365');
+	const google = sources.includes('google');
+	const unsure = !sources.length || sources.some((s) => s !== 'm365' && s !== 'google');
+	return [
+		...(m365 || unsure ? [OUTLOOK_CALENDAR] : []),
+		...(google || unsure ? [GOOGLE_CALENDAR] : [])
+	];
+};
+
+/** onb_book's slot_busy refusal, by its text (a job carries text, not the code). */
+export const isSlotBusy = (text: string | null | undefined): boolean =>
+	!!text && /^That hour is busy/i.test(text.trim());
+
+/** "Thu 15 Oct, 9:00–10:00 AM" — the hour from `hour`, in the planner's zone. */
+export const hourRangeLabel = (hour: Date, timeZone?: string): string => {
+	const fmt = new Intl.DateTimeFormat('en-AU', {
+		weekday: 'short',
+		day: 'numeric',
+		month: 'short',
+		hour: 'numeric',
+		minute: '2-digit',
+		hour12: true,
+		timeZone
+	});
+	const parts = (d: Date) =>
+		Object.fromEntries(fmt.formatToParts(d).map((p) => [p.type, p.value])) as Record<string, string>;
+	const s = parts(hour);
+	const e = parts(new Date(hour.getTime() + HOUR));
+	const sp = String(s.dayPeriod).toUpperCase();
+	const ep = String(e.dayPeriod).toUpperCase();
+	const day = `${s.weekday} ${s.day} ${s.month}`;
+	return sp === ep
+		? `${day}, ${s.hour}:${s.minute}–${e.hour}:${e.minute} ${ep}`
+		: `${day}, ${s.hour}:${s.minute} ${sp}–${e.hour}:${e.minute} ${ep}`;
+};
 
 /** A gateway refusal as the planner should read it. */
 export const actionMessage = (e: unknown): string => {
@@ -284,7 +378,7 @@ const BUSY = 'Another send or booking for this step is already running';
 
 /**
  * Why a finished onboarding job refused, in planner words — or null when it
- * did not fail. A refusal (busy, already sent/booked, bad slot) fails only
+ * did not fail. A refusal (busy, already sent/booked, bad or busy slot) fails only
  * the job and leaves the row untouched, so without this the click looks
  * like it did nothing. The job carries the message text, not the code.
  */
