@@ -135,11 +135,14 @@ export const sourceCalendars = (): CalendarModel[] =>
 		updated_at: 0
 	}));
 
-export const fallbackAttention = (tasks: AgendaTask[], today: string): AgendaTask[] => {
-	const overdue = tasks.filter((t) => t.status === 'overdue').sort(byDue);
-	const dueToday = tasks.filter((t) => t.status !== 'overdue' && t.dueAt?.slice(0, 10) === today).sort(byDue);
-	return [...overdue, ...dueToday].slice(0, 6);
-};
+/** Needs attention without the agent's view. Overdue tasks are only COUNTED:
+ *  To do, by client already lists them in its Overdue group, and repeating the
+ *  list here showed the same rows twice. Due-today tasks sit inside their
+ *  client groups there, so they are still listed here (up to six). */
+export const fallbackAttention = (tasks: AgendaTask[], today: string): { overdue: number; dueToday: AgendaTask[] } => ({
+	overdue: tasks.filter((t) => t.status === 'overdue').length,
+	dueToday: tasks.filter((t) => t.status !== 'overdue' && t.dueAt?.slice(0, 10) === today).sort(byDue).slice(0, 6)
+});
 
 // --- writes: what the planner is about to change, and what the page shows
 // while the gateway does it. The page confirms with describeChange(), applies

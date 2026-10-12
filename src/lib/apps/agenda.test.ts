@@ -124,17 +124,19 @@ describe('week view mapping', () => {
 });
 
 describe('fallbackAttention', () => {
-	it('overdue first, then due today, capped at six', () => {
+	it('counts overdue (listed below already) and lists due today, capped at six', () => {
 		const tasks = [
 			task({ id: 'today', dueAt: TODAY }),
 			task({ id: 'late', dueAt: '2026-09-01', status: 'overdue' }),
 			task({ id: 'future', dueAt: '2026-09-30' }),
-			...Array.from({ length: 8 }, (_, i) => task({ id: `l${i}`, dueAt: '2026-09-02', status: 'overdue' }))
+			...Array.from({ length: 8 }, (_, i) => task({ id: `t${i}`, dueAt: TODAY })),
+			...Array.from({ length: 3 }, (_, i) => task({ id: `l${i}`, dueAt: '2026-09-02', status: 'overdue' }))
 		];
 		const out = fallbackAttention(tasks, TODAY);
-		expect(out).toHaveLength(6);
-		expect(out.every((t) => t.status === 'overdue')).toBe(true);
-		expect(fallbackAttention(tasks.slice(0, 3), TODAY).map((t) => t.id)).toEqual(['late', 'today']);
+		expect(out.overdue).toBe(4);
+		expect(out.dueToday).toHaveLength(6);
+		expect(out.dueToday.every((t) => t.status !== 'overdue')).toBe(true);
+		expect(fallbackAttention(tasks.slice(0, 3), TODAY)).toEqual({ overdue: 1, dueToday: [tasks[0]] });
 	});
 });
 

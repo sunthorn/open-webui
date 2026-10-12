@@ -43,7 +43,7 @@
 
 	$: xplanLocked = agenda?.sources.xplan?.status === 'locked';
 	$: sourceErrors = Object.entries(agenda?.sources ?? {}).filter(([, s]) => s?.status === 'error') as [string, { message?: string }][];
-	$: attention = agenda ? fallbackAttention(agenda.tasks, today) : [];
+	$: attention = agenda ? fallbackAttention(agenda.tasks, today) : { overdue: 0, dueToday: [] };
 	$: weekEvents = agenda ? toCalendarEvents(agenda.events) : [];
 	const calendars = sourceCalendars();
 	const visible = new Set(calendars.map((c) => c.id));
@@ -210,12 +210,19 @@
 				{#if briefing?.narrative}
 					<div class="rounded-2xl border border-gray-100 dark:border-gray-800 p-4 text-sm whitespace-pre-line">{briefing.narrative}</div>
 					<p class="text-xs text-gray-400 mt-1">the agent's view, from your calendars and XPLAN · compiled {compiledLabel(briefing.compiledAt)} · updates when you re-read XPLAN</p>
-				{:else if attention.length}
+				{:else if attention.overdue || attention.dueToday.length}
 					<ul class="rounded-2xl border border-gray-100 dark:border-gray-800 divide-y divide-gray-100 dark:divide-gray-800">
-						{#each attention as t (t.id)}
+						{#if attention.overdue}
+							<li class="px-4 py-2.5 text-sm">
+								<a href="#todo-by-client" class="text-red-600 dark:text-red-400 hover:underline">
+									{attention.overdue} overdue {attention.overdue === 1 ? 'task' : 'tasks'} — listed under Overdue below ↓
+								</a>
+							</li>
+						{/if}
+						{#each attention.dueToday as t (t.id)}
 							<li class="px-4 py-2.5 text-sm flex justify-between gap-3">
 								<span>{t.title}{#if t.client} <span class="text-gray-500">· {t.client.name}</span>{/if}</span>
-								<span class="text-xs shrink-0 {t.status === 'overdue' ? 'text-red-600' : 'text-gray-400'}">{t.status === 'overdue' ? 'overdue' : 'today'}</span>
+								<span class="text-xs shrink-0 text-gray-400">today</span>
 							</li>
 						{/each}
 					</ul>
@@ -255,7 +262,7 @@
 				</div>
 			</section>
 
-			<section>
+			<section id="todo-by-client" class="scroll-mt-4">
 				<h2 class="text-xs font-semibold uppercase tracking-wide mb-3 text-gray-500">To do, by client</h2>
 				<TodoByClient tasks={agenda.tasks} {today} {xplanLocked} {busyId} on:open={(e) => open(e.detail)}
 					on:complete={(e) => run({ kind: 'complete', task: e.detail })}
