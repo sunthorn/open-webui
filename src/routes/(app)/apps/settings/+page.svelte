@@ -254,7 +254,9 @@
 						{:else if panel === 'download'}
 							Your XPLAN browser is on your computer. Install the axi helper once — it
 							connects this computer's Chrome to axi. Download it, open the zip, and
-							double-click install.
+							double-click <code>install.command</code> (Mac) or <code>install.bat</code>
+							(Windows). If macOS blocks it: System Settings › Privacy &amp; Security ›
+							Open Anyway.
 						{:else if showHelper}
 							The XPLAN helper is not installed on this computer. It keeps this
 							window open while axi is running. Install it once: open a terminal in the
