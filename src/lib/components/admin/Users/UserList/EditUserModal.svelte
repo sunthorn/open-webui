@@ -29,8 +29,7 @@
 
 	const init = () => {
 		if (selectedUser) {
-			_user = selectedUser;
-			_user.password = '';
+			_user = { ...selectedUser, password: '', xplan_access: selectedUser.xplan_access === true };
 			loadUserGroups();
 		}
 	};

@@ -33,7 +33,7 @@
 	let loggedIn: boolean | null = null;
 	let helper: 'running' | 'not-installed' | undefined;
 	let helperDownload = false;
-	// Not on XPLAN_ALLOWED_USERS. Every step below would 403, so none is shown.
+	// XPLAN access switch is off (Admin → Users). Every step below would 403, so none is shown.
 	let notEnabled = false;
 	let probed = false;
 	// The gateway itself is unreachable (network/CORS/auth), as opposed to
