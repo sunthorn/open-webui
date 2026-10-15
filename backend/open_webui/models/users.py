@@ -22,6 +22,7 @@ from sqlalchemy import (
     cast,
     delete,
     exists,
+    false,
     func,
     or_,
     select,
@@ -73,6 +74,10 @@ class User(Base):  # identity & profile
     oauth = Column(JSON, nullable=True)
     scim = Column(JSON, nullable=True)
 
+    # axi: may use XPLAN through the shared browser. Admin-set only (never
+    # in info, which the user can write). Spec 2026-10-15-xplan-access-switch.
+    xplan_access = Column(Boolean, nullable=False, default=False, server_default=false())
+
     # Timestamps (epoch seconds)
     last_active_at = Column(BigInteger)
     updated_at = Column(BigInteger)
@@ -108,6 +113,7 @@ class UserModel(BaseModel):
     settings: UserSettings | None = None
 
     oauth: dict | None = None
+    xplan_access: bool = False
     scim: dict | None = None
 
     last_active_at: int  # timestamp in epoch
@@ -258,6 +264,7 @@ class UserUpdateForm(BaseModel):
     email: str | None = None
     profile_image_url: str | None = None
     password: str | None = None
+    xplan_access: bool | None = None
 
     @field_validator('profile_image_url', mode='before')
     @classmethod

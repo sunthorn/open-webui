@@ -142,6 +142,7 @@ async def create_session_response(
         'profile_image_url': f'/api/v1/users/{user.id}/profile/image',
         'permissions': user_permissions,
         'must_change_password': user_must_change_password(user),
+        'xplan_access': bool(getattr(user, 'xplan_access', False)),
     }
 
 
@@ -154,6 +155,7 @@ class SessionUserResponse(Token, UserProfileImageResponse):
     expires_at: int | None = None
     permissions: dict | None = None
     must_change_password: bool = False
+    xplan_access: bool = False
 
 
 class SessionUserInfoResponse(SessionUserResponse, UserStatus):
@@ -223,6 +225,7 @@ async def get_session_user(
         'status_expires_at': user.status_expires_at,
         'permissions': user_permissions,
         'must_change_password': user_must_change_password(user),
+        'xplan_access': bool(getattr(user, 'xplan_access', False)),
     }
 
     return response_data

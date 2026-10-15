@@ -610,6 +610,9 @@ async def update_user_by_id(
         if form_data.profile_image_url is not None:
             update_data['profile_image_url'] = form_data.profile_image_url
 
+        if form_data.xplan_access is not None:
+            update_data['xplan_access'] = form_data.xplan_access
+
         if update_data:
             updated_user = await Users.update_user_by_id(
                 user_id,

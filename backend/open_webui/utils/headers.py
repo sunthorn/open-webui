@@ -72,6 +72,8 @@ def get_custom_headers(custom_headers: dict, user=None, metadata: dict = None) -
         '{{USER_NAME}}': (user.name if user else '') or '',
         '{{USER_EMAIL}}': (user.email if user else '') or '',
         '{{USER_ROLE}}': (user.role if user else '') or '',
+        # axi: hermes keeps the XPLAN browser only for "1" (spec 2026-10-15).
+        '{{USER_XPLAN}}': '1' if (user is not None and getattr(user, 'xplan_access', False)) else '',
     }
 
     parsed_headers = {}
