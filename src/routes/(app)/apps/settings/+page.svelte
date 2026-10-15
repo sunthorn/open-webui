@@ -12,6 +12,7 @@
 	// page. One copy of the markup, and the tier control below is the only thing
 	// that writes the access state.
 	import { onMount, onDestroy } from 'svelte';
+	import { user } from '$lib/stores';
 	import {
 		getXplanStatus,
 		getXplanAccess,
@@ -224,9 +225,11 @@
 		>
 			<h2 class="text-sm font-semibold">XPLAN isn't enabled for your account</h2>
 			<p class="text-sm text-gray-500 mt-1">
-				This axi reaches XPLAN through one signed-in browser, so only the people an
-				administrator has listed can use it — anyone else would be working in XPLAN as
-				that person. Ask your axi administrator to add you.
+				This axi reaches XPLAN through one signed-in browser, so only people with XPLAN
+				access can use it. An axi administrator can turn it on under Admin → Users.
+				{#if $user?.role === 'admin'}
+					<a class="underline" href="/admin/users">Open Admin → Users</a>
+				{/if}
 			</p>
 		</div>
 	{:else}

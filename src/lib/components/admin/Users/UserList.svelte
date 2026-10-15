@@ -371,6 +371,9 @@
 									type={user.role === 'admin' ? 'info' : user.role === 'user' ? 'success' : 'muted'}
 									content={$i18n.t(user.role)}
 								/>
+								{#if user.xplan_access}
+									<Badge type="muted" content="XPLAN" />
+								{/if}
 							</button>
 						</td>
 						<td class="px-3 py-1 font-medium text-gray-900 dark:text-white max-w-48">

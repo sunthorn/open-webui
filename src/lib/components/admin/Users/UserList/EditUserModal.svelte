@@ -11,6 +11,7 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import localizedFormat from 'dayjs/plugin/localizedFormat';
 	import XMark from '$lib/components/icons/XMark.svelte';
+	import Switch from '$lib/components/common/Switch.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import UserProfileImage from '$lib/components/chat/Settings/Account/UserProfileImage.svelte';
 
@@ -39,7 +40,8 @@
 		role: 'pending',
 		name: '',
 		email: '',
-		password: ''
+		password: '',
+		xplan_access: false
 	};
 
 	let userGroups: any[] | null = null;
@@ -150,6 +152,16 @@
 												<option value="pending">{$i18n.t('Pending')}</option>
 											</select>
 										</div>
+									</div>
+
+									<div class="flex w-full items-start justify-between gap-3">
+										<div>
+											<div class="text-xs text-gray-500">{$i18n.t('XPLAN access')}</div>
+											<div class="text-xs text-gray-400 mt-0.5">
+												{$i18n.t("Lets this person sync and read XPLAN through axi's shared XPLAN browser.")}
+											</div>
+										</div>
+										<Switch bind:state={_user.xplan_access} />
 									</div>
 
 									<div class="flex flex-col w-full">

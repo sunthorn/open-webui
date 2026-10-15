@@ -488,6 +488,7 @@ type UserUpdateForm = {
 	email: string;
 	name: string;
 	password: string;
+	xplan_access?: boolean;
 };
 
 export const updateUserById = async (token: string, userId: string, user: UserUpdateForm) => {
@@ -504,7 +505,8 @@ export const updateUserById = async (token: string, userId: string, user: UserUp
 			role: user.role,
 			email: user.email,
 			name: user.name,
-			password: user.password !== '' ? user.password : undefined
+			password: user.password !== '' ? user.password : undefined,
+			xplan_access: user.xplan_access
 		})
 	})
 		.then(async (res) => {
